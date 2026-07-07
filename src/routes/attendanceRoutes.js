@@ -7,6 +7,7 @@ import {
   getMyAttendance,
   getTeamAttendance,
   getAllAttendance,
+  getSundayStatus,
   regularizeAttendance,
   clearTodayAttendance,
   clearAllAttendance,
@@ -21,6 +22,7 @@ router.get("/today",             protect, getTodayAttendance);
 router.get("/my-records",        protect, getMyAttendance);
 router.get("/team",              protect, getTeamAttendance);
 router.get("/all",               protect, requireManager, getAllAttendance);
+router.get("/sunday-status",     protect, requireManager, getSundayStatus);
 router.patch("/:id/regularize",  protect, requireManager, regularizeAttendance);
 router.get("/geocode",           protect, geocodeLocation);
 router.delete("/clear-today",    protect, clearTodayAttendance);

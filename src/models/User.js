@@ -40,12 +40,20 @@ const userSchema = new mongoose.Schema({
   },
   company: {
     type: String,
-    enum: ["Nutech International", "SPL Technologies", "Both"],
+    enum: ["Nutech International", "SPL Technologies"],
     default: "Nutech International",
   },
   mustChangePassword: {
     type: Boolean,
     default: false,
+  },
+  shiftStart: {
+    type: String, // "HH:mm", 24-hour
+    default: "10:00",
+  },
+  shiftEnd: {
+    type: String, // "HH:mm", 24-hour
+    default: "18:30",
   },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,

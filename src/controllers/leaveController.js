@@ -1,5 +1,7 @@
 import Leave from "../models/Leave.js";
 
+const CL_ANNUAL_QUOTA = 12;
+
 // POST /api/leaves/apply
 export const applyLeave = async (req, res) => {
   try {
@@ -7,6 +9,22 @@ export const applyLeave = async (req, res) => {
     if (!leaveType || !reason || !leaveDate) {
       return res.status(400).json({ message: "All fields are required." });
     }
+
+    if (leaveType === "CL") {
+      const year = leaveDate.slice(0, 4);
+      const usedCL = await Leave.countDocuments({
+        userId: req.user.id,
+        leaveType: "CL",
+        status: { $ne: "rejected" },
+        leaveDate: { $gte: `${year}-01-01`, $lte: `${year}-12-31` },
+      });
+      if (usedCL >= CL_ANNUAL_QUOTA) {
+        return res.status(400).json({
+          message: `You've used all ${CL_ANNUAL_QUOTA} Casual Leave (CL) days for ${year}.`,
+        });
+      }
+    }
+
     const leave = await Leave.create({
       userId: req.user.id,
       leaveType,
@@ -70,9 +88,13 @@ export const approveLeave = async (req, res) => {
 // PATCH /api/leaves/:id/reject
 export const rejectLeave = async (req, res) => {
   try {
+    const { reason } = req.body;
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ message: "A rejection reason is required." });
+    }
     const leave = await Leave.findByIdAndUpdate(
       req.params.id,
-      { status: "rejected", reviewedBy: req.user.id },
+      { status: "rejected", reviewedBy: req.user.id, rejectionReason: reason.trim() },
       { new: true }
     ).populate("userId", "name phone");
     if (!leave) return res.status(404).json({ message: "Leave not found." });

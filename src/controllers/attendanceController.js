@@ -5,17 +5,33 @@ import axios from "axios";
 // Today's date as "YYYY-MM-DD"
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
-// Office starts 10:00 AM IST; punch-ins after 10:15 AM are late.
+// Punch-ins more than this many minutes after an employee's own shift start are late.
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-const LATE_CUTOFF_MINUTES = 10 * 60 + 15; // 10:15 AM, in minutes since midnight
+const LATE_GRACE_MINUTES = 15;
 const MONTHLY_LATE_REBATES = 3;
+
+// Sunday is only a paid holiday if the employee worked at least 4.5 of their
+// own standard shift-days (Mon–Sat) that week.
+const SUNDAY_HOLIDAY_DAYS = 4.5;
+
+const fmtDate = (d) => d.toISOString().slice(0, 10); // d must already be a UTC-midnight Date
+
+// "HH:mm" -> minutes since midnight. Falls back to the default 10:00 shift start
+// if the value is missing/malformed (e.g. records created before shifts existed).
+const parseTimeToMinutes = (hhmm, fallback = "10:00") => {
+  const [h, m] = (/^\d{2}:\d{2}$/.test(hhmm || "") ? hhmm : fallback).split(":").map(Number);
+  return h * 60 + m;
+};
+
+const shiftDurationMinutes = (shiftStart, shiftEnd) =>
+  parseTimeToMinutes(shiftEnd, "18:30") - parseTimeToMinutes(shiftStart, "10:00");
 
 // Computed off the UTC instant + a fixed IST offset, so this is correct
 // regardless of the server's own local timezone.
-export const isLateArrival = (punchInTime) => {
+export const isLateArrival = (punchInTime, shiftStart = "10:00") => {
   const ist = new Date(punchInTime.getTime() + IST_OFFSET_MS);
   const minutesOfDay = ist.getUTCHours() * 60 + ist.getUTCMinutes();
-  return minutesOfDay > LATE_CUTOFF_MINUTES;
+  return minutesOfDay > parseTimeToMinutes(shiftStart) + LATE_GRACE_MINUTES;
 };
 
 // POST /api/attendance/punch-in
@@ -33,7 +49,9 @@ export const punchIn = async (req, res) => {
 
     const { lat, lng, address } = req.body;
     const punchInTime = new Date();
-    const late = isLateArrival(punchInTime);
+    const shiftStart = user.shiftStart || "10:00";
+    const shiftEnd   = user.shiftEnd   || "18:30";
+    const late = isLateArrival(punchInTime, shiftStart);
 
     // Only late arrivals need the rebate check — count how many late (and not
     // already-forgiven) days happened earlier this month, before today.
@@ -64,6 +82,8 @@ export const punchIn = async (req, res) => {
           status,
           lateArrival: late,
           lateRebateApplied: late && rebateApplied,
+          shiftStart,
+          shiftEnd,
           ...(lat && lng ? { punchInLocation: { lat, lng } } : {}),
           ...(address   ? { punchInAddress: address }         : {}),
         },
@@ -100,10 +120,13 @@ export const punchOut = async (req, res) => {
     const punchOutTime = new Date();
     const totalMinutes = Math.floor((punchOutTime - record.punchIn) / 60000);
 
+    // Half of THIS employee's own shift length (snapshotted at punch-in), not a flat 4 hours.
+    const halfDayMinutes = shiftDurationMinutes(record.shiftStart, record.shiftEnd) / 2;
+
     // An unforgiven late arrival is already locked to half-day at punch-in —
     // working full hours doesn't undo the lateness penalty.
     const lockedHalfDay = record.lateArrival && !record.lateRebateApplied;
-    const status = lockedHalfDay ? "half-day" : (totalMinutes >= 240 ? "present" : "half-day");
+    const status = lockedHalfDay ? "half-day" : (totalMinutes >= halfDayMinutes ? "present" : "half-day");
 
     record.punchOut     = punchOutTime;
     record.totalMinutes = totalMinutes;
@@ -188,9 +211,10 @@ export const regularizeAttendance = async (req, res) => {
       // Recompute what the system would have decided on its own, from the
       // facts already on the record — no separate "original status" needed.
       const lockedByLateness = record.lateArrival && !record.lateRebateApplied;
+      const halfDayMinutes = shiftDurationMinutes(record.shiftStart, record.shiftEnd) / 2;
       record.status = lockedByLateness
         ? "half-day"
-        : (record.totalMinutes != null ? (record.totalMinutes >= 240 ? "present" : "half-day") : "present");
+        : (record.totalMinutes != null ? (record.totalMinutes >= halfDayMinutes ? "present" : "half-day") : "present");
       record.regularized         = false;
       record.regularizedBy       = null;
       record.regularizedAt       = null;
@@ -262,5 +286,55 @@ export const getAllAttendance = async (req, res) => {
     return res.json({ records });
   } catch (err) {
     return res.status(500).json({ message: "Could not fetch attendance." });
+  }
+};
+
+// GET /api/attendance/sunday-status?userId=X&month=YYYY-MM
+// For every Sunday in the given month, reports whether that employee worked
+// enough hours Mon–Sat that week (>= 4.5 of their own shift-length days) to
+// have earned Sunday as a paid holiday. Flag only — nothing is auto-marked.
+export const getSundayStatus = async (req, res) => {
+  try {
+    const { userId, month } = req.query;
+    if (!userId || !month) {
+      return res.status(400).json({ message: "userId and month (YYYY-MM) are required." });
+    }
+
+    const user = await User.findById(userId).select("shiftStart shiftEnd");
+    if (!user) return res.status(404).json({ message: "User not found." });
+    const requiredMinutes = SUNDAY_HOLIDAY_DAYS * shiftDurationMinutes(user.shiftStart, user.shiftEnd);
+
+    const [y, m] = month.split("-").map(Number);
+    const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
+
+    const sundayDays = [];
+    for (let d = 1; d <= daysInMonth; d++) {
+      if (new Date(Date.UTC(y, m - 1, d)).getUTCDay() === 0) sundayDays.push(d);
+    }
+
+    const sundays = [];
+    for (const day of sundayDays) {
+      const weekStart = fmtDate(new Date(Date.UTC(y, m - 1, day - 6))); // Monday
+      const weekEnd   = fmtDate(new Date(Date.UTC(y, m - 1, day - 1))); // Saturday
+
+      const weekRecords = await Attendance.find({
+        userId,
+        date: { $gte: weekStart, $lte: weekEnd },
+      });
+      const weekMinutes = weekRecords.reduce((sum, r) => sum + (r.totalMinutes || 0), 0);
+
+      sundays.push({
+        date: fmtDate(new Date(Date.UTC(y, m - 1, day))),
+        weekStart,
+        weekEnd,
+        weekHours: Math.round((weekMinutes / 60) * 100) / 100,
+        requiredHours: Math.round((requiredMinutes / 60) * 100) / 100,
+        earned: weekMinutes >= requiredMinutes,
+      });
+    }
+
+    return res.json({ sundays });
+  } catch (err) {
+    return res.status(500).json({ message: "Could not compute Sunday eligibility.", error: err.message });
   }
 };

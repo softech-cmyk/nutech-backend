@@ -1,4 +1,3 @@
-import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
@@ -9,13 +8,17 @@ const signToken = (user, role = user.role) =>
     expiresIn: process.env.JWT_EXPIRES_IN,
   });
 
-// Helper: random 12-char temp password, shown to the admin exactly once
-const generateTempPassword = () => crypto.randomBytes(9).toString("base64url");
+const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/; // "HH:mm", 24-hour
 
-// 1) CREATE EMPLOYEE — manager-only. Generates the account + a one-time temp password.
+// 1) CREATE EMPLOYEE — manager-only. The manager sets the employee's password
+// and their working hours (shift) themselves.
 export const createEmployee = async (req, res) => {
   try {
-    const { name, phone, countryCode = "+91", role = "employee", department, company = "Nutech International" } = req.body;
+    const {
+      name, phone, countryCode = "+91", role = "employee", department,
+      company = "Nutech International", password,
+      shiftStart = "10:00", shiftEnd = "18:30",
+    } = req.body;
 
     if (!name || !phone) {
       return res.status(400).json({ message: "Name and phone number are required." });
@@ -29,14 +32,23 @@ export const createEmployee = async (req, res) => {
     if (!department) {
       return res.status(400).json({ message: "Please select a department." });
     }
+    if (!password || password.length < 6) {
+      return res.status(400).json({ message: "Password must be at least 6 characters." });
+    }
+    if (!TIME_RE.test(shiftStart) || !TIME_RE.test(shiftEnd)) {
+      return res.status(400).json({ message: "Shift start/end must be valid times (HH:mm)." });
+    }
+    const toMinutes = (t) => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
+    if (toMinutes(shiftEnd) <= toMinutes(shiftStart)) {
+      return res.status(400).json({ message: "Shift end time must be after the shift start time." });
+    }
 
     const existing = await User.findOne({ phone });
     if (existing) {
       return res.status(409).json({ message: "An account with this number already exists." });
     }
 
-    const tempPassword = generateTempPassword();
-    const passwordHash = await bcrypt.hash(tempPassword, 12);
+    const passwordHash = await bcrypt.hash(password, 12);
 
     const user = await User.create({
       name,
@@ -48,14 +60,18 @@ export const createEmployee = async (req, res) => {
       department,
       company,
       managerId: role === "employee" ? req.user.id : null,
-      mustChangePassword: true,
+      mustChangePassword: false,
       createdBy: req.user.id,
+      shiftStart,
+      shiftEnd,
     });
 
     return res.status(201).json({
       message: "Employee account created.",
-      tempPassword,
-      user: { id: user._id, name: user.name, phone: user.phone, countryCode: user.countryCode, role: user.role, department: user.department },
+      user: {
+        id: user._id, name: user.name, phone: user.phone, countryCode: user.countryCode,
+        role: user.role, department: user.department, shiftStart: user.shiftStart, shiftEnd: user.shiftEnd,
+      },
     });
   } catch (err) {
     console.error("createEmployee error:", err.message);

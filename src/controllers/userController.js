@@ -1,3 +1,4 @@
+import bcrypt from "bcryptjs";
 import User from "../models/User.js";
 
 // GET /api/users/all — all users, company-wide (manager only)
@@ -83,5 +84,30 @@ export const assignManager = async (req, res) => {
     return res.json({ message: "Manager assigned.", employee });
   } catch (err) {
     return res.status(500).json({ message: "Could not assign manager." });
+  }
+};
+
+// PATCH /api/users/:id/reset-password — manager-only. Sets a new password directly.
+export const resetPassword = async (req, res) => {
+  try {
+    if (req.user.role !== "manager") {
+      return res.status(403).json({ message: "Access denied. Managers only." });
+    }
+
+    const { newPassword } = req.body;
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ message: "New password must be at least 6 characters." });
+    }
+
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+
+    user.password = await bcrypt.hash(newPassword, 12);
+    user.mustChangePassword = false;
+    await user.save();
+
+    return res.json({ message: `Password reset for ${user.name || user.phone}.` });
+  } catch (err) {
+    return res.status(500).json({ message: "Could not reset password.", error: err.message });
   }
 };

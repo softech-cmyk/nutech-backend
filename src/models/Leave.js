@@ -29,6 +29,10 @@ const leaveSchema = new mongoose.Schema({
     ref: "User",
     default: null,
   },
+  rejectionReason: {
+    type: String,
+    default: null,
+  },
 }, { timestamps: true });
 
 export default mongoose.model("Leave", leaveSchema);

@@ -8,7 +8,7 @@ const attendanceSchema = new mongoose.Schema({
   },
   company: {
     type: String,
-    enum: ["Nutech International", "SPL Technologies", "Both"],
+    enum: ["Nutech International", "SPL Technologies"],
     required: true,
   },
   date: {
@@ -37,6 +37,10 @@ const attendanceSchema = new mongoose.Schema({
   },
   punchInAddress:  { type: String, default: null },
   punchOutAddress: { type: String, default: null },
+  // Snapshot of the employee's shift at punch-in time, so late-arrival/half-day
+  // rules stay consistent for this record even if their shift changes later.
+  shiftStart: { type: String, default: "10:00" },
+  shiftEnd:   { type: String, default: "18:30" },
   status: {
     type: String,
     enum: ["present", "half-day", "absent"],
