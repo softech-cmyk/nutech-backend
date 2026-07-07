@@ -20,9 +20,25 @@ const app = express();
 
 
 // Middlewares
+const allowedOrigins = (process.env.CLIENT_URL || "http://localhost:5173")
+    .split(",")
+    .map((url) => url.trim());
+
 app.use(
     cors({
-        origin: process.env.CLIENT_URL || "http://localhost:5173",
+        origin: (origin, callback) => {
+            // Allow non-browser requests (no origin header), exact matches,
+            // and any Vercel preview deployment of this frontend project.
+            if (
+                !origin ||
+                allowedOrigins.includes(origin) ||
+                /^https:\/\/attendance-system-frontend[a-z0-9-]*\.vercel\.app$/.test(origin)
+            ) {
+                callback(null, true);
+            } else {
+                callback(new Error(`Not allowed by CORS: ${origin}`));
+            }
+        },
         credentials: true,
     })
 );
