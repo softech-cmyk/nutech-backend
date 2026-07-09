@@ -43,51 +43,63 @@ export const punchIn = async (req, res) => {
     const date = todayStr();
     const existing = await Attendance.findOne({ userId: user._id, date });
 
-    if (existing && existing.punchIn) {
-      return res.status(409).json({ message: "Already punched in for today." });
+    const lastSession = existing?.sessions?.[existing.sessions.length - 1];
+    if (lastSession && !lastSession.punchOut) {
+      return res.status(409).json({ message: "Already punched in. Punch out first." });
     }
 
     const { lat, lng, address } = req.body;
     const punchInTime = new Date();
     const shiftStart = user.shiftStart || "10:00";
     const shiftEnd   = user.shiftEnd   || "18:30";
-    const late = isLateArrival(punchInTime, shiftStart);
 
-    // Only late arrivals need the rebate check — count how many late (and not
-    // already-forgiven) days happened earlier this month, before today.
-    let rebateApplied = false;
+    // Late-arrival / rebate status is decided once, off the day's very first
+    // punch-in — stepping out and back later doesn't re-trigger it.
+    const isFirstPunch = !existing || !existing.sessions?.length;
+    let late = existing?.lateArrival || false;
+    let rebateApplied = existing?.lateRebateApplied || false;
     let lateRebatesUsed = 0;
-    if (late) {
-      const firstOfMonth = `${date.slice(0, 7)}-01`;
-      const priorLateCount = await Attendance.countDocuments({
-        userId: user._id,
-        lateArrival: true,
-        date: { $gte: firstOfMonth, $lt: date },
-      });
-      rebateApplied = priorLateCount < MONTHLY_LATE_REBATES;
-      lateRebatesUsed = rebateApplied ? priorLateCount + 1 : MONTHLY_LATE_REBATES;
+
+    if (isFirstPunch) {
+      late = isLateArrival(punchInTime, shiftStart);
+      if (late) {
+        const firstOfMonth = `${date.slice(0, 7)}-01`;
+        const priorLateCount = await Attendance.countDocuments({
+          userId: user._id,
+          lateArrival: true,
+          date: { $gte: firstOfMonth, $lt: date },
+        });
+        rebateApplied = priorLateCount < MONTHLY_LATE_REBATES;
+        lateRebatesUsed = rebateApplied ? priorLateCount + 1 : MONTHLY_LATE_REBATES;
+      }
     }
 
-    // A forgiven late arrival is still tentatively "present" — punch-out's
-    // hours-worked check can still knock it down to half-day. An unforgiven
-    // late arrival is locked to half-day regardless of hours worked.
-    const status = late && !rebateApplied ? "half-day" : "present";
+    const newSession = {
+      punchIn: punchInTime,
+      ...(lat && lng ? { punchInLocation: { lat, lng } } : {}),
+      ...(address   ? { punchInAddress: address }         : {}),
+    };
+
+    const setFields = {
+      company: user.company || "Nutech International",
+      shiftStart,
+      shiftEnd,
+    };
+    if (isFirstPunch) {
+      // A forgiven late arrival is still tentatively "present" — punch-out's
+      // hours-worked check can still knock it down to half-day. An unforgiven
+      // late arrival is locked to half-day regardless of hours worked.
+      setFields.punchIn          = punchInTime;
+      setFields.status           = late && !rebateApplied ? "half-day" : "present";
+      setFields.lateArrival      = late;
+      setFields.lateRebateApplied = late && rebateApplied;
+      if (lat && lng) setFields.punchInLocation = { lat, lng };
+      if (address)    setFields.punchInAddress  = address;
+    }
 
     const record = await Attendance.findOneAndUpdate(
       { userId: user._id, date },
-      {
-        $set: {
-          punchIn: punchInTime,
-          company: user.company || "Nutech International",
-          status,
-          lateArrival: late,
-          lateRebateApplied: late && rebateApplied,
-          shiftStart,
-          shiftEnd,
-          ...(lat && lng ? { punchInLocation: { lat, lng } } : {}),
-          ...(address   ? { punchInAddress: address }         : {}),
-        },
-      },
+      { $set: setFields, $push: { sessions: newSession } },
       { upsert: true, new: true }
     );
 
@@ -109,16 +121,27 @@ export const punchOut = async (req, res) => {
     const date = todayStr();
     const record = await Attendance.findOne({ userId: req.user.id, date });
 
-    if (!record || !record.punchIn) {
+    const lastSession = record?.sessions?.[record.sessions.length - 1];
+    if (!record || !lastSession) {
       return res.status(400).json({ message: "You haven't punched in today." });
     }
-    if (record.punchOut) {
-      return res.status(409).json({ message: "Already punched out for today." });
+    if (lastSession.punchOut) {
+      return res.status(409).json({ message: "Already punched out. Punch in again to start a new session." });
     }
 
     const { lat, lng, address } = req.body;
     const punchOutTime = new Date();
-    const totalMinutes = Math.floor((punchOutTime - record.punchIn) / 60000);
+
+    lastSession.punchOut = punchOutTime;
+    if (lat && lng) lastSession.punchOutLocation = { lat, lng };
+    if (address)    lastSession.punchOutAddress  = address;
+    record.markModified("sessions");
+
+    // Total worked time is the sum of every completed session today, not just this one.
+    const totalMinutes = record.sessions.reduce(
+      (sum, s) => (s.punchOut ? sum + Math.floor((s.punchOut - s.punchIn) / 60000) : sum),
+      0
+    );
 
     // Half of THIS employee's own shift length (snapshotted at punch-in), not a flat 4 hours.
     const halfDayMinutes = shiftDurationMinutes(record.shiftStart, record.shiftEnd) / 2;
@@ -177,7 +200,9 @@ export const getTeamAttendance = async (req, res) => {
     const records = await Attendance.find({
       userId: { $in: employeeIds },
       date: targetDate,
-    }).populate("userId", "name phone department company");
+    })
+      .populate("userId", "name phone department company")
+      .populate("locationViewLogs.viewedBy", "name");
 
     return res.json({ date: targetDate, records });
   } catch (err) {
@@ -202,6 +227,12 @@ export const regularizeAttendance = async (req, res) => {
     const { action, note } = req.body;
     if (!["full-day", "half-day", "reset"].includes(action)) {
       return res.status(400).json({ message: "action must be 'full-day', 'half-day', or 'reset'." });
+    }
+    // Resetting just reverts to the system's own computed status — nothing to
+    // justify. Overriding it to full/half day is a manual judgment call, so
+    // a reason is required for accountability.
+    if (action !== "reset" && !note?.trim()) {
+      return res.status(400).json({ message: "A reason is required to regularize attendance." });
     }
 
     const record = await Attendance.findById(req.params.id);
@@ -233,6 +264,28 @@ export const regularizeAttendance = async (req, res) => {
   } catch (err) {
     console.error("regularizeAttendance error:", err.message);
     return res.status(500).json({ message: "Could not update attendance.", error: err.message });
+  }
+};
+
+// POST /api/attendance/:id/view-location  (manager-only)
+// Logs who viewed this record's punch location and why, before the map is shown.
+export const logLocationView = async (req, res) => {
+  try {
+    const { reason } = req.body;
+    if (!reason?.trim()) {
+      return res.status(400).json({ message: "A reason is required to view location data." });
+    }
+
+    const record = await Attendance.findByIdAndUpdate(
+      req.params.id,
+      { $push: { locationViewLogs: { viewedBy: req.user.id, reason: reason.trim() } } },
+      { new: true }
+    ).populate("locationViewLogs.viewedBy", "name");
+
+    if (!record) return res.status(404).json({ message: "Attendance record not found." });
+    return res.json({ message: "Location view logged.", attendance: record });
+  } catch (err) {
+    return res.status(500).json({ message: "Could not log location view.", error: err.message });
   }
 };
 
@@ -280,6 +333,7 @@ export const getAllAttendance = async (req, res) => {
 
     const records = await Attendance.find(filter)
       .populate("userId", "name phone department company role")
+      .populate("locationViewLogs.viewedBy", "name")
       .sort({ date: -1 })
       .limit(500);
 

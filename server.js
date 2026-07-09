@@ -10,6 +10,7 @@ import authRoutes from "./src/routes/authRoutes.js";
 import userRoutes from "./src/routes/userRoutes.js";
 import attendanceRoutes from "./src/routes/attendanceRoutes.js";
 import leaveRoutes from "./src/routes/leaveRoutes.js";
+import holidayRoutes from "./src/routes/holidayRoutes.js";
 
 
 // Load environment variables
@@ -51,6 +52,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/leaves", leaveRoutes);
+app.use("/api/holidays", holidayRoutes);
 
 
 // Test Route
