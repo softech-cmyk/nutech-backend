@@ -15,7 +15,11 @@ const leaveSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
-  leaveDate: {
+  startDate: {
+    type: String,
+    required: true,
+  },
+  endDate: {
     type: String,
     required: true,
   },

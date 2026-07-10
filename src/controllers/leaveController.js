@@ -3,25 +3,36 @@ import { sendPushToUser } from "../utils/webPush.js";
 
 const CL_ANNUAL_QUOTA = 12;
 
+const daysInRange = (start, end) => Math.round((new Date(end) - new Date(start)) / 86400000) + 1;
+
 // POST /api/leaves/apply
 export const applyLeave = async (req, res) => {
   try {
-    const { leaveType, reason, leaveDate } = req.body;
-    if (!leaveType || !reason || !leaveDate) {
+    const { leaveType, reason, startDate, endDate } = req.body;
+    if (!leaveType || !reason || !startDate || !endDate) {
       return res.status(400).json({ message: "All fields are required." });
+    }
+    if (startDate > endDate) {
+      return res.status(400).json({ message: "Start date must be on or before end date." });
+    }
+    const year = startDate.slice(0, 4);
+    if (endDate.slice(0, 4) !== year) {
+      return res.status(400).json({ message: "A leave request must stay within a single calendar year." });
     }
 
     if (leaveType === "CL") {
-      const year = leaveDate.slice(0, 4);
-      const usedCL = await Leave.countDocuments({
+      const clLeaves = await Leave.find({
         userId: req.user.id,
         leaveType: "CL",
         status: { $ne: "rejected" },
-        leaveDate: { $gte: `${year}-01-01`, $lte: `${year}-12-31` },
+        startDate: { $gte: `${year}-01-01`, $lte: `${year}-12-31` },
       });
-      if (usedCL >= CL_ANNUAL_QUOTA) {
+      const usedDays = clLeaves.reduce((sum, l) => sum + daysInRange(l.startDate, l.endDate), 0);
+      const requestedDays = daysInRange(startDate, endDate);
+      if (usedDays + requestedDays > CL_ANNUAL_QUOTA) {
+        const remaining = Math.max(0, CL_ANNUAL_QUOTA - usedDays);
         return res.status(400).json({
-          message: `You've used all ${CL_ANNUAL_QUOTA} Casual Leave (CL) days for ${year}.`,
+          message: `You only have ${remaining} Casual Leave (CL) day(s) left for ${year}.`,
         });
       }
     }
@@ -30,7 +41,8 @@ export const applyLeave = async (req, res) => {
       userId: req.user.id,
       leaveType,
       reason,
-      leaveDate,
+      startDate,
+      endDate,
     });
     return res.status(201).json({ message: "Leave applied successfully.", leave });
   } catch (err) {
@@ -81,9 +93,12 @@ export const approveLeave = async (req, res) => {
     ).populate("userId", "name phone");
     if (!leave) return res.status(404).json({ message: "Leave not found." });
 
+    const when = leave.startDate === leave.endDate
+      ? `on ${leave.startDate}`
+      : `from ${leave.startDate} to ${leave.endDate}`;
     sendPushToUser(leave.userId._id, {
       title: "Leave approved",
-      body: `Your ${leave.leaveType} leave on ${leave.leaveDate} was approved.`,
+      body: `Your ${leave.leaveType} leave ${when} was approved.`,
       url: "/EmployeeDashboard",
     });
 
@@ -107,9 +122,12 @@ export const rejectLeave = async (req, res) => {
     ).populate("userId", "name phone");
     if (!leave) return res.status(404).json({ message: "Leave not found." });
 
+    const when = leave.startDate === leave.endDate
+      ? `on ${leave.startDate}`
+      : `from ${leave.startDate} to ${leave.endDate}`;
     sendPushToUser(leave.userId._id, {
       title: "Leave rejected",
-      body: `Your ${leave.leaveType} leave on ${leave.leaveDate} was rejected: ${leave.rejectionReason}`,
+      body: `Your ${leave.leaveType} leave ${when} was rejected: ${leave.rejectionReason}`,
       url: "/EmployeeDashboard",
     });
 
