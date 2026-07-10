@@ -12,7 +12,6 @@ import attendanceRoutes from "./src/routes/attendanceRoutes.js";
 import leaveRoutes from "./src/routes/leaveRoutes.js";
 import holidayRoutes from "./src/routes/holidayRoutes.js";
 import notificationRoutes from "./src/routes/notificationRoutes.js";
-import { startAutoPunchOutJob } from "./src/jobs/autoPunchOut.js";
 
 
 // Load environment variables
@@ -94,7 +93,6 @@ const connectDB = async () => {
 // Start server only after DB connects
 const startServer = async () => {
     await connectDB();
-    startAutoPunchOutJob();
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => {
         console.log(`🚀 Server running on port ${PORT}`);
