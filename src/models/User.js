@@ -60,6 +60,10 @@ const userSchema = new mongoose.Schema({
     ref: "User",
     default: null,
   },
+  pushSubscriptions: {
+    type: [mongoose.Schema.Types.Mixed], // raw PushSubscription JSON objects from the browser
+    default: [],
+  },
 }, { timestamps: true });
 
 export default mongoose.model("User", userSchema);

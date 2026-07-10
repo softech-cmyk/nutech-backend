@@ -56,9 +56,11 @@ const attendanceSchema = new mongoose.Schema({
       },
       punchInAddress:  { type: String, default: null },
       punchOutAddress: { type: String, default: null },
+      autoPunchOut: { type: Boolean, default: false },
     }],
     default: [],
   },
+  autoPunchOut: { type: Boolean, default: false },
   // Snapshot of the employee's shift at punch-in time, so late-arrival/half-day
   // rules stay consistent for this record even if their shift changes later.
   shiftStart: { type: String, default: "10:00" },

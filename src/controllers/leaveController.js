@@ -1,4 +1,5 @@
 import Leave from "../models/Leave.js";
+import { sendPushToUser } from "../utils/webPush.js";
 
 const CL_ANNUAL_QUOTA = 12;
 
@@ -79,6 +80,13 @@ export const approveLeave = async (req, res) => {
       { new: true }
     ).populate("userId", "name phone");
     if (!leave) return res.status(404).json({ message: "Leave not found." });
+
+    sendPushToUser(leave.userId._id, {
+      title: "Leave approved",
+      body: `Your ${leave.leaveType} leave on ${leave.leaveDate} was approved.`,
+      url: "/EmployeeDashboard",
+    });
+
     return res.json({ message: "Leave approved.", leave });
   } catch (err) {
     return res.status(500).json({ message: "Failed to approve leave." });
@@ -98,6 +106,13 @@ export const rejectLeave = async (req, res) => {
       { new: true }
     ).populate("userId", "name phone");
     if (!leave) return res.status(404).json({ message: "Leave not found." });
+
+    sendPushToUser(leave.userId._id, {
+      title: "Leave rejected",
+      body: `Your ${leave.leaveType} leave on ${leave.leaveDate} was rejected: ${leave.rejectionReason}`,
+      url: "/EmployeeDashboard",
+    });
+
     return res.json({ message: "Leave rejected.", leave });
   } catch (err) {
     return res.status(500).json({ message: "Failed to reject leave." });

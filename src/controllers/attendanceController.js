@@ -1,13 +1,14 @@
 import Attendance from "../models/Attendance.js";
 import User from "../models/User.js";
 import axios from "axios";
+import {
+  todayStr,
+  parseTimeToMinutes,
+  shiftDurationMinutes,
+  isLateArrival,
+  computePunchOutStatus,
+} from "../utils/attendanceTime.js";
 
-// Today's date as "YYYY-MM-DD"
-const todayStr = () => new Date().toISOString().slice(0, 10);
-
-// Punch-ins more than this many minutes after an employee's own shift start are late.
-const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-const LATE_GRACE_MINUTES = 15;
 const MONTHLY_LATE_REBATES = 3;
 
 // Sunday is only a paid holiday if the employee worked at least 4.5 of their
@@ -15,24 +16,6 @@ const MONTHLY_LATE_REBATES = 3;
 const SUNDAY_HOLIDAY_DAYS = 4.5;
 
 const fmtDate = (d) => d.toISOString().slice(0, 10); // d must already be a UTC-midnight Date
-
-// "HH:mm" -> minutes since midnight. Falls back to the default 10:00 shift start
-// if the value is missing/malformed (e.g. records created before shifts existed).
-const parseTimeToMinutes = (hhmm, fallback = "10:00") => {
-  const [h, m] = (/^\d{2}:\d{2}$/.test(hhmm || "") ? hhmm : fallback).split(":").map(Number);
-  return h * 60 + m;
-};
-
-const shiftDurationMinutes = (shiftStart, shiftEnd) =>
-  parseTimeToMinutes(shiftEnd, "18:30") - parseTimeToMinutes(shiftStart, "10:00");
-
-// Computed off the UTC instant + a fixed IST offset, so this is correct
-// regardless of the server's own local timezone.
-export const isLateArrival = (punchInTime, shiftStart = "10:00") => {
-  const ist = new Date(punchInTime.getTime() + IST_OFFSET_MS);
-  const minutesOfDay = ist.getUTCHours() * 60 + ist.getUTCMinutes();
-  return minutesOfDay > parseTimeToMinutes(shiftStart) + LATE_GRACE_MINUTES;
-};
 
 // POST /api/attendance/punch-in
 export const punchIn = async (req, res) => {
@@ -143,17 +126,9 @@ export const punchOut = async (req, res) => {
       0
     );
 
-    // Half of THIS employee's own shift length (snapshotted at punch-in), not a flat 4 hours.
-    const halfDayMinutes = shiftDurationMinutes(record.shiftStart, record.shiftEnd) / 2;
-
-    // An unforgiven late arrival is already locked to half-day at punch-in —
-    // working full hours doesn't undo the lateness penalty.
-    const lockedHalfDay = record.lateArrival && !record.lateRebateApplied;
-    const status = lockedHalfDay ? "half-day" : (totalMinutes >= halfDayMinutes ? "present" : "half-day");
-
     record.punchOut     = punchOutTime;
     record.totalMinutes = totalMinutes;
-    record.status       = status;
+    record.status       = computePunchOutStatus(record, totalMinutes);
     if (lat && lng)  record.punchOutLocation = { lat, lng };
     if (address)     record.punchOutAddress  = address;
     await record.save();
