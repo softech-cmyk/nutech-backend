@@ -2,6 +2,7 @@ import dns from "dns";
 dns.setServers(["8.8.8.8", "8.8.4.4"]);
 
 import express from "express";
+import { createServer } from "http";
 import mongoose from "mongoose";
 import dotenv from "dotenv";
 import cors from "cors";
@@ -12,6 +13,7 @@ import attendanceRoutes from "./src/routes/attendanceRoutes.js";
 import leaveRoutes from "./src/routes/leaveRoutes.js";
 import holidayRoutes from "./src/routes/holidayRoutes.js";
 import notificationRoutes from "./src/routes/notificationRoutes.js";
+import { initSocket } from "./src/socket/index.js";
 
 
 // Load environment variables
@@ -46,6 +48,9 @@ app.use(
 );
 
 app.use(express.json());
+
+const httpServer = createServer(app);
+initSocket(httpServer, allowedOrigins);
 
 
 // Routes
@@ -94,7 +99,7 @@ const connectDB = async () => {
 const startServer = async () => {
     await connectDB();
     const PORT = process.env.PORT || 5000;
-    app.listen(PORT, () => {
+    httpServer.listen(PORT, () => {
         console.log(`🚀 Server running on port ${PORT}`);
     });
 };

@@ -1,6 +1,7 @@
 import Attendance from "../models/Attendance.js";
 import User from "../models/User.js";
 import axios from "axios";
+import { getLiveLocations } from "../socket/index.js";
 import {
   todayStr,
   parseTimeToMinutes,
@@ -278,6 +279,11 @@ export const geocodeLocation = async (req, res) => {
     console.error("Geocode error:", err.message);
     return res.json({ address: null });
   }
+};
+
+// GET /api/attendance/live-locations  (manager-only — initial snapshot before socket events arrive)
+export const getLiveLocationsSnapshot = (req, res) => {
+  return res.json({ locations: getLiveLocations() });
 };
 
 // DELETE /api/attendance/clear-all

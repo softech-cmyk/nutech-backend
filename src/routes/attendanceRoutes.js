@@ -13,6 +13,7 @@ import {
   clearAllAttendance,
   geocodeLocation,
   logLocationView,
+  getLiveLocationsSnapshot,
 } from "../controllers/attendanceController.js";
 
 const router = express.Router();
@@ -27,6 +28,7 @@ router.get("/sunday-status",     protect, requireManager, getSundayStatus);
 router.patch("/:id/regularize",  protect, requireManager, regularizeAttendance);
 router.post("/:id/view-location", protect, requireManager, logLocationView);
 router.get("/geocode",           protect, geocodeLocation);
+router.get("/live-locations",    protect, requireManager, getLiveLocationsSnapshot);
 router.delete("/clear-today",    protect, clearTodayAttendance);
 router.delete("/clear-all",      protect, clearAllAttendance);
 
