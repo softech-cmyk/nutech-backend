@@ -6,6 +6,11 @@ import { createServer } from "http";
 import mongoose from "mongoose";
 import dotenv from "dotenv";
 import cors from "cors";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 import authRoutes from "./src/routes/authRoutes.js";
 import userRoutes from "./src/routes/userRoutes.js";
@@ -62,9 +67,11 @@ app.use("/api/holidays", holidayRoutes);
 app.use("/api/notifications", notificationRoutes);
 
 
-// Test Route
-app.get("/", (req, res) => {
-    res.send("Nutech Attendance API Running");
+// Serve the website (React build)
+app.use(express.static(path.join(__dirname, "public")));
+
+app.get(/^(?!\/api).*/, (req, res) => {
+    res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
 
