@@ -7,6 +7,9 @@ import {
   promoteToManager,
   assignManager,
   resetPassword,
+  updateSalary,
+  getBankAccount,
+  updateBankAccount,
 } from "../controllers/userController.js";
 import { protect } from "../middleware/auth.js";
 
@@ -19,5 +22,8 @@ router.get("/:id", protect, getUserById);                      // get any user b
 router.patch("/:id/promote", protect, promoteToManager);       // promote to manager
 router.patch("/:id/assign-manager", protect, assignManager);   // assign employee to manager
 router.patch("/:id/reset-password", protect, resetPassword);   // manager only
+router.patch("/:id/salary", protect, updateSalary);             // manager only
+router.get("/:id/bank-account", protect, getBankAccount);       // manager only, masked
+router.patch("/:id/bank-account", protect, updateBankAccount);  // manager only
 
 export default router;

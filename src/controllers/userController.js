@@ -7,7 +7,7 @@ export const getAllUsers = async (req, res) => {
     if (req.user.role !== "manager") {
       return res.status(403).json({ message: "Access denied. Managers only." });
     }
-    const users = await User.find().select("_id name phone countryCode department company role createdAt").sort({ createdAt: -1 });
+    const users = await User.find().select("_id name phone countryCode department company role createdAt monthlySalary").sort({ createdAt: -1 });
     return res.json({ users });
   } catch (err) {
     return res.status(500).json({ message: "Could not fetch users." });
@@ -41,7 +41,7 @@ export const getMyEmployees = async (req, res) => {
     if (req.user.role !== "manager") {
       return res.status(403).json({ message: "Access denied. Managers only." });
     }
-    const employees = await User.find({ managerId: req.user.id }).select("-password");
+    const employees = await User.find({ managerId: req.user.id }).select("-password -bankAccount.accountNumber");
     return res.json({ employees });
   } catch (err) {
     return res.status(500).json({ message: "Could not fetch employees." });
@@ -109,5 +109,107 @@ export const resetPassword = async (req, res) => {
     return res.json({ message: `Password reset for ${user.name || user.phone}.` });
   } catch (err) {
     return res.status(500).json({ message: "Could not reset password.", error: err.message });
+  }
+};
+
+// PATCH /api/users/:id/salary — manager-only. Sets the employee's gross monthly salary.
+export const updateSalary = async (req, res) => {
+  try {
+    if (req.user.role !== "manager") {
+      return res.status(403).json({ message: "Access denied. Managers only." });
+    }
+
+    const { monthlySalary } = req.body;
+    if (monthlySalary === undefined || monthlySalary === null || monthlySalary === "" || isNaN(monthlySalary) || Number(monthlySalary) < 0) {
+      return res.status(400).json({ message: "Enter a valid, non-negative monthly salary." });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      { monthlySalary: Number(monthlySalary) },
+      { new: true }
+    ).select("-password -bankAccount.accountNumber");
+    if (!user) return res.status(404).json({ message: "User not found." });
+
+    return res.json({ message: "Salary updated.", user });
+  } catch (err) {
+    return res.status(500).json({ message: "Could not update salary.", error: err.message });
+  }
+};
+
+const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+
+// GET /api/users/:id/bank-account — manager-only. Returns a masked view, never the full number.
+export const getBankAccount = async (req, res) => {
+  try {
+    if (req.user.role !== "manager") {
+      return res.status(403).json({ message: "Access denied. Managers only." });
+    }
+
+    const user = await User.findById(req.params.id).select("bankAccount");
+    if (!user) return res.status(404).json({ message: "User not found." });
+
+    const ba = user.bankAccount;
+    if (!ba?.accountNumber) return res.json({ bankAccount: null });
+
+    return res.json({
+      bankAccount: {
+        accountHolderName: ba.accountHolderName,
+        accountNumberMasked: `•••• ${ba.accountNumber.slice(-4)}`,
+        ifsc: ba.ifsc,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ message: "Could not fetch bank details.", error: err.message });
+  }
+};
+
+// PATCH /api/users/:id/bank-account — manager-only. Sets/updates the employee's payout bank account.
+export const updateBankAccount = async (req, res) => {
+  try {
+    if (req.user.role !== "manager") {
+      return res.status(403).json({ message: "Access denied. Managers only." });
+    }
+
+    const accountHolderName = req.body.accountHolderName?.trim();
+    const accountNumber = req.body.accountNumber?.trim();
+    const ifsc = req.body.ifsc?.trim().toUpperCase();
+
+    if (!accountHolderName || !accountNumber || !ifsc) {
+      return res.status(400).json({ message: "Account holder name, account number, and IFSC are all required." });
+    }
+    if (!/^[0-9]{6,20}$/.test(accountNumber)) {
+      return res.status(400).json({ message: "Enter a valid account number." });
+    }
+    if (!IFSC_RE.test(ifsc)) {
+      return res.status(400).json({ message: "Enter a valid IFSC code." });
+    }
+
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+
+    // If the actual account changed, drop the cached RazorpayX fund account —
+    // the next payout will create a fresh one against the new details.
+    const changed = user.bankAccount?.accountNumber !== accountNumber || user.bankAccount?.ifsc !== ifsc;
+
+    user.bankAccount = {
+      accountHolderName,
+      accountNumber,
+      ifsc,
+      razorpayContactId: changed ? null : user.bankAccount?.razorpayContactId || null,
+      razorpayFundAccountId: changed ? null : user.bankAccount?.razorpayFundAccountId || null,
+    };
+    await user.save();
+
+    return res.json({
+      message: "Bank details saved.",
+      bankAccount: {
+        accountHolderName,
+        accountNumberMasked: `•••• ${accountNumber.slice(-4)}`,
+        ifsc,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ message: "Could not save bank details.", error: err.message });
   }
 };

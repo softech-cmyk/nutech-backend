@@ -18,6 +18,7 @@ import attendanceRoutes from "./src/routes/attendanceRoutes.js";
 import leaveRoutes from "./src/routes/leaveRoutes.js";
 import holidayRoutes from "./src/routes/holidayRoutes.js";
 import notificationRoutes from "./src/routes/notificationRoutes.js";
+import payrollRoutes from "./src/routes/payrollRoutes.js";
 import { initSocket } from "./src/socket/index.js";
 
 
@@ -52,7 +53,9 @@ app.use(
     })
 );
 
-app.use(express.json());
+// Also stash the raw request body — the RazorpayX webhook needs the exact
+// bytes (not the re-serialized object) to verify its HMAC signature.
+app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
 
 const httpServer = createServer(app);
 initSocket(httpServer, allowedOrigins);
@@ -65,6 +68,7 @@ app.use("/api/attendance", attendanceRoutes);
 app.use("/api/leaves", leaveRoutes);
 app.use("/api/holidays", holidayRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/payroll", payrollRoutes);
 
 
 // Serve the website (React build)

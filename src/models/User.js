@@ -55,6 +55,19 @@ const userSchema = new mongoose.Schema({
     type: String, // "HH:mm", 24-hour
     default: "18:30",
   },
+  monthlySalary: {
+    type: Number, // gross monthly salary in INR
+    default: null,
+  },
+  bankAccount: {
+    accountHolderName: { type: String, default: null },
+    accountNumber: { type: String, default: null },
+    ifsc: { type: String, default: null },
+    // Cached RazorpayX identifiers so we only create a Contact/Fund Account
+    // once per employee — cleared whenever the account number or IFSC changes.
+    razorpayContactId: { type: String, default: null },
+    razorpayFundAccountId: { type: String, default: null },
+  },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",

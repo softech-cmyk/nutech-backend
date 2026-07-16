@@ -17,7 +17,7 @@ export const createEmployee = async (req, res) => {
     const {
       name, phone, countryCode = "+91", role = "employee", department,
       company = "Nutech International", password,
-      shiftStart = "10:00", shiftEnd = "18:30",
+      shiftStart = "10:00", shiftEnd = "18:30", monthlySalary,
     } = req.body;
 
     if (!name || !phone) {
@@ -42,6 +42,9 @@ export const createEmployee = async (req, res) => {
     if (toMinutes(shiftEnd) <= toMinutes(shiftStart)) {
       return res.status(400).json({ message: "Shift end time must be after the shift start time." });
     }
+    if (monthlySalary === undefined || monthlySalary === null || monthlySalary === "" || isNaN(monthlySalary) || Number(monthlySalary) < 0) {
+      return res.status(400).json({ message: "Enter a valid monthly salary." });
+    }
 
     const existing = await User.findOne({ phone });
     if (existing) {
@@ -64,6 +67,7 @@ export const createEmployee = async (req, res) => {
       createdBy: req.user.id,
       shiftStart,
       shiftEnd,
+      monthlySalary: Number(monthlySalary),
     });
 
     return res.status(201).json({
@@ -71,6 +75,7 @@ export const createEmployee = async (req, res) => {
       user: {
         id: user._id, name: user.name, phone: user.phone, countryCode: user.countryCode,
         role: user.role, department: user.department, shiftStart: user.shiftStart, shiftEnd: user.shiftEnd,
+        monthlySalary: user.monthlySalary,
       },
     });
   } catch (err) {
