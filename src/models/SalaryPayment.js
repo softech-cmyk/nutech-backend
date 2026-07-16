@@ -19,6 +19,7 @@ const salaryPaymentSchema = new mongoose.Schema({
   halfDays: { type: Number, required: true },
   absentDays: { type: Number, required: true },
   paidLeaveDays: { type: Number, required: true },
+  unpaidLeaveDays: { type: Number, required: true },
   perDayRate: { type: Number, required: true },
   deduction: { type: Number, required: true },
   netSalary: { type: Number, required: true },

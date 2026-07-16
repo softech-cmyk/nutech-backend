@@ -62,14 +62,15 @@ const computeMonthPayroll = async (users) => {
     status: "approved",
     startDate: { $lte: monthEnd },
     endDate: { $gte: monthStart },
-  }).select("userId startDate endDate");
+  }).select("userId startDate endDate leaveType");
   const leavesByUser = {};
   for (const leave of approvedLeaves) {
     const uid = String(leave.userId);
     (leavesByUser[uid] ||= []).push(leave);
   }
-  const isOnApprovedLeave = (uid, dateStr) =>
-    (leavesByUser[uid] || []).some((l) => dateStr >= l.startDate && dateStr <= l.endDate);
+  // PWL ("leave without pay") deducts like an absence; CL/SL/EL stay paid.
+  const leaveTypeOn = (uid, dateStr) =>
+    (leavesByUser[uid] || []).find((l) => dateStr >= l.startDate && dateStr <= l.endDate)?.leaveType || null;
 
   const byUserId = {};
   for (const u of users) {
@@ -77,17 +78,21 @@ const computeMonthPayroll = async (users) => {
     const gross = u.monthlySalary;
     const perDayRate = gross != null ? gross / workingDates.length : null;
 
-    let presentDays = 0, halfDays = 0, absentDays = 0, paidLeaveDays = 0;
+    let presentDays = 0, halfDays = 0, absentDays = 0, paidLeaveDays = 0, unpaidLeaveDays = 0;
     for (const dateStr of elapsedWorkingDates) {
       const status = attendanceByUser[uid]?.[dateStr];
       if (status === "present") presentDays++;
       else if (status === "half-day") halfDays++;
       else if (status === "absent") absentDays++;
-      else if (isOnApprovedLeave(uid, dateStr)) paidLeaveDays++;
-      else absentDays++;
+      else {
+        const leaveType = leaveTypeOn(uid, dateStr);
+        if (leaveType === "PWL") unpaidLeaveDays++;
+        else if (leaveType) paidLeaveDays++;
+        else absentDays++;
+      }
     }
 
-    const deduction = perDayRate != null ? perDayRate * (absentDays + halfDays * 0.5) : null;
+    const deduction = perDayRate != null ? perDayRate * (absentDays + unpaidLeaveDays + halfDays * 0.5) : null;
     const netSalary = gross != null ? gross - deduction : null;
 
     byUserId[uid] = {
@@ -98,6 +103,7 @@ const computeMonthPayroll = async (users) => {
       halfDays,
       absentDays,
       paidLeaveDays,
+      unpaidLeaveDays,
       perDayRate: perDayRate != null ? round2(perDayRate) : null,
       deduction: deduction != null ? round2(deduction) : null,
       netSalary: netSalary != null ? round2(netSalary) : null,
@@ -117,6 +123,7 @@ const snapshotFields = (summary, monthStr) => ({
   halfDays: summary.halfDays,
   absentDays: summary.absentDays,
   paidLeaveDays: summary.paidLeaveDays,
+  unpaidLeaveDays: summary.unpaidLeaveDays,
   perDayRate: summary.perDayRate,
   deduction: summary.deduction,
   netSalary: summary.netSalary,
