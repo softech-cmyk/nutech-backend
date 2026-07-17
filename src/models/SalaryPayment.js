@@ -23,6 +23,14 @@ const salaryPaymentSchema = new mongoose.Schema({
   perDayRate: { type: Number, required: true },
   deduction: { type: Number, required: true },
   netSalary: { type: Number, required: true },
+  // Further optional deductions on top of netSalary — whatever was set on
+  // the employee at the moment this was paid.
+  esi: { type: Number, default: null },
+  pf: { type: Number, default: null },
+  bonus: { type: Number, default: null },
+  gratuity: { type: Number, default: null },
+  // netSalary minus esi/pf/bonus/gratuity — the amount actually credited.
+  finalNetSalary: { type: Number, required: true },
   paidBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",

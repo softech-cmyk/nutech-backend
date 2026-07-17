@@ -68,6 +68,15 @@ const userSchema = new mongoose.Schema({
     razorpayContactId: { type: String, default: null },
     razorpayFundAccountId: { type: String, default: null },
   },
+  // Optional further deductions applied on top of the attendance-based net
+  // salary to arrive at final in-hand pay. None are required — a manager
+  // only fills in whichever apply to a given employee.
+  salaryAdjustments: {
+    esi:      { type: Number, default: null },
+    pf:       { type: Number, default: null },
+    bonus:    { type: Number, default: null },
+    gratuity: { type: Number, default: null },
+  },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",

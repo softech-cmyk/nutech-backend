@@ -95,6 +95,16 @@ const computeMonthPayroll = async (users) => {
     const deduction = perDayRate != null ? perDayRate * (absentDays + unpaidLeaveDays + halfDays * 0.5) : null;
     const netSalary = gross != null ? gross - deduction : null;
 
+    // Optional further deductions on top of net salary — whatever ESI/PF/
+    // Bonus/Gratuity amounts the manager has set for this employee, if any.
+    const adj = u.salaryAdjustments || {};
+    const esi = adj.esi ?? null;
+    const pf = adj.pf ?? null;
+    const bonus = adj.bonus ?? null;
+    const gratuity = adj.gratuity ?? null;
+    const totalAdjustments = (esi || 0) + (pf || 0) + (bonus || 0) + (gratuity || 0);
+    const finalNetSalary = netSalary != null ? netSalary - totalAdjustments : null;
+
     byUserId[uid] = {
       userId: u._id,
       monthlySalary: gross,
@@ -107,6 +117,14 @@ const computeMonthPayroll = async (users) => {
       perDayRate: perDayRate != null ? round2(perDayRate) : null,
       deduction: deduction != null ? round2(deduction) : null,
       netSalary: netSalary != null ? round2(netSalary) : null,
+      esi,
+      pf,
+      bonus,
+      gratuity,
+      // The amount actually credited to the employee's account — net salary
+      // minus ESI/PF/Bonus/Gratuity (nothing here is compulsory; missing
+      // values just don't reduce the total).
+      finalNetSalary: finalNetSalary != null ? round2(finalNetSalary) : null,
     };
   }
 
@@ -127,6 +145,11 @@ const snapshotFields = (summary, monthStr) => ({
   perDayRate: summary.perDayRate,
   deduction: summary.deduction,
   netSalary: summary.netSalary,
+  esi: summary.esi,
+  pf: summary.pf,
+  bonus: summary.bonus,
+  gratuity: summary.gratuity,
+  finalNetSalary: summary.finalNetSalary,
 });
 
 // GET /api/payroll/summary — manager-only.
@@ -136,7 +159,7 @@ export const getPayrollSummary = async (req, res) => {
       return res.status(403).json({ message: "Access denied. Managers only." });
     }
 
-    const users = await User.find().select("name phone department role monthlySalary");
+    const users = await User.find().select("name phone department role monthlySalary salaryAdjustments");
     const { monthStr, byUserId } = await computeMonthPayroll(users);
 
     const payments = await SalaryPayment.find({
@@ -173,7 +196,7 @@ export const paySalary = async (req, res) => {
       return res.status(403).json({ message: "Access denied. Managers only." });
     }
 
-    const user = await User.findById(req.params.userId).select("name phone department role monthlySalary");
+    const user = await User.findById(req.params.userId).select("name phone department role monthlySalary salaryAdjustments");
     if (!user) return res.status(404).json({ message: "User not found." });
     if (user.monthlySalary == null) {
       return res.status(400).json({ message: "Set this employee's salary before paying." });
@@ -245,7 +268,7 @@ export const payViaBankTransfer = async (req, res) => {
 
     const { monthStr, byUserId } = await computeMonthPayroll([user]);
     const summary = byUserId[String(user._id)];
-    if (summary.netSalary == null || summary.netSalary <= 0) {
+    if (summary.finalNetSalary == null || summary.finalNetSalary <= 0) {
       return res.status(400).json({ message: "Nothing to pay for this month." });
     }
 
@@ -276,7 +299,7 @@ export const payViaBankTransfer = async (req, res) => {
 
       const payout = await createPayout({
         fundAccountId: user.bankAccount.razorpayFundAccountId,
-        amount: summary.netSalary,
+        amount: summary.finalNetSalary,
         referenceId: `${user._id}-${monthStr}`,
         narration: `Salary ${monthStr}`,
       });

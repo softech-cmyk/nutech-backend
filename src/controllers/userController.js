@@ -7,7 +7,7 @@ export const getAllUsers = async (req, res) => {
     if (req.user.role !== "manager") {
       return res.status(403).json({ message: "Access denied. Managers only." });
     }
-    const users = await User.find().select("_id name phone countryCode department company role createdAt monthlySalary").sort({ createdAt: -1 });
+    const users = await User.find().select("_id name phone countryCode department company role createdAt monthlySalary salaryAdjustments").sort({ createdAt: -1 });
     return res.json({ users });
   } catch (err) {
     return res.status(500).json({ message: "Could not fetch users." });
@@ -134,6 +134,42 @@ export const updateSalary = async (req, res) => {
     return res.json({ message: "Salary updated.", user });
   } catch (err) {
     return res.status(500).json({ message: "Could not update salary.", error: err.message });
+  }
+};
+
+// PATCH /api/users/:id/salary-adjustments — manager-only. Optional further
+// deductions (ESI, PF, bonus, gratuity) applied on top of the attendance-based
+// net salary. None are required — any field left out is cleared to null.
+export const updateSalaryAdjustments = async (req, res) => {
+  try {
+    if (req.user.role !== "manager") {
+      return res.status(403).json({ message: "Access denied. Managers only." });
+    }
+
+    const fields = ["esi", "pf", "bonus", "gratuity"];
+    const salaryAdjustments = {};
+    for (const key of fields) {
+      const val = req.body[key];
+      if (val === undefined || val === null || val === "") {
+        salaryAdjustments[key] = null;
+        continue;
+      }
+      if (isNaN(val) || Number(val) < 0) {
+        return res.status(400).json({ message: `Enter a valid, non-negative ${key.toUpperCase()}.` });
+      }
+      salaryAdjustments[key] = Number(val);
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      { salaryAdjustments },
+      { new: true }
+    ).select("-password -bankAccount.accountNumber");
+    if (!user) return res.status(404).json({ message: "User not found." });
+
+    return res.json({ message: "Adjustments saved.", user });
+  } catch (err) {
+    return res.status(500).json({ message: "Could not save adjustments.", error: err.message });
   }
 };
 
