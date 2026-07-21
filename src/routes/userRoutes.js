@@ -11,6 +11,7 @@ import {
   updateSalaryAdjustments,
   getBankAccount,
   updateBankAccount,
+  deleteUser,
 } from "../controllers/userController.js";
 import { protect } from "../middleware/auth.js";
 
@@ -27,5 +28,6 @@ router.patch("/:id/salary", protect, updateSalary);             // manager only
 router.patch("/:id/salary-adjustments", protect, updateSalaryAdjustments); // manager only
 router.get("/:id/bank-account", protect, getBankAccount);       // manager only, masked
 router.patch("/:id/bank-account", protect, updateBankAccount);  // manager only
+router.delete("/:id", protect, deleteUser);                      // manager only
 
 export default router;

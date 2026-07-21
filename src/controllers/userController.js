@@ -1,5 +1,8 @@
 import bcrypt from "bcryptjs";
 import User from "../models/User.js";
+import Attendance from "../models/Attendance.js";
+import Leave from "../models/Leave.js";
+import SalaryPayment from "../models/SalaryPayment.js";
 
 // GET /api/users/all — all users, company-wide (manager only)
 export const getAllUsers = async (req, res) => {
@@ -247,5 +250,34 @@ export const updateBankAccount = async (req, res) => {
     });
   } catch (err) {
     return res.status(500).json({ message: "Could not save bank details.", error: err.message });
+  }
+};
+
+// DELETE /api/users/:id — manager-only. Permanently removes the employee
+// along with all their attendance, leave, and payroll history. Irreversible.
+export const deleteUser = async (req, res) => {
+  try {
+    if (req.user.role !== "manager") {
+      return res.status(403).json({ message: "Access denied. Managers only." });
+    }
+    if (req.params.id === req.user.id) {
+      return res.status(400).json({ message: "You can't delete your own account." });
+    }
+
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+
+    await Promise.all([
+      Attendance.deleteMany({ userId: user._id }),
+      Leave.deleteMany({ userId: user._id }),
+      SalaryPayment.deleteMany({ userId: user._id }),
+      // Any employees who reported to this manager are left unassigned, not orphaned.
+      User.updateMany({ managerId: user._id }, { managerId: null }),
+    ]);
+    await user.deleteOne();
+
+    return res.json({ message: `${user.name || user.phone} and all their records were deleted.` });
+  } catch (err) {
+    return res.status(500).json({ message: "Could not delete employee.", error: err.message });
   }
 };

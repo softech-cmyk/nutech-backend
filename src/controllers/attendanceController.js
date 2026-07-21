@@ -243,6 +243,53 @@ export const regularizeAttendance = async (req, res) => {
   }
 };
 
+// POST /api/attendance/mark — manager-only. Manually marks attendance for an
+// employee who has no punch record yet today (e.g. forgot to punch in, or is
+// known to be out). For an employee who already has a record, use regularize
+// instead — this only creates new records, it never overwrites one.
+export const markAttendance = async (req, res) => {
+  try {
+    const { userId, status, note, date } = req.body;
+    if (!userId || !status) {
+      return res.status(400).json({ message: "userId and status are required." });
+    }
+    if (!["present", "half-day", "absent"].includes(status)) {
+      return res.status(400).json({ message: "status must be 'present', 'half-day', or 'absent'." });
+    }
+    if (!note?.trim()) {
+      return res.status(400).json({ message: "A reason is required to mark attendance." });
+    }
+
+    const user = await User.findById(userId).select("company shiftStart shiftEnd");
+    if (!user) return res.status(404).json({ message: "Employee not found." });
+
+    const targetDate = date || todayStr();
+    const existing = await Attendance.findOne({ userId, date: targetDate });
+    if (existing) {
+      return res.status(409).json({ message: "This employee already has an attendance record for this date — use regularize instead." });
+    }
+
+    const record = await Attendance.create({
+      userId,
+      company: user.company || "Nutech International",
+      date: targetDate,
+      status,
+      shiftStart: user.shiftStart || "10:00",
+      shiftEnd: user.shiftEnd || "18:30",
+      regularized: true,
+      regularizedBy: req.user.id,
+      regularizedAt: new Date(),
+      regularizationNote: note.trim(),
+    });
+
+    const populated = await record.populate("userId", "name phone department company");
+    return res.status(201).json({ message: "Attendance marked.", attendance: populated });
+  } catch (err) {
+    console.error("markAttendance error:", err.message);
+    return res.status(500).json({ message: "Could not mark attendance.", error: err.message });
+  }
+};
+
 // POST /api/attendance/:id/view-location  (manager-only)
 // Logs who viewed this record's punch location and why, before the map is shown.
 export const logLocationView = async (req, res) => {

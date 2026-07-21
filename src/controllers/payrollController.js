@@ -62,15 +62,16 @@ const computeMonthPayroll = async (users) => {
     status: "approved",
     startDate: { $lte: monthEnd },
     endDate: { $gte: monthStart },
-  }).select("userId startDate endDate leaveType");
+  }).select("userId startDate endDate leaveType isHalfDay");
   const leavesByUser = {};
   for (const leave of approvedLeaves) {
     const uid = String(leave.userId);
     (leavesByUser[uid] ||= []).push(leave);
   }
   // PWL ("leave without pay") deducts like an absence; CL/SL/EL stay paid.
-  const leaveTypeOn = (uid, dateStr) =>
-    (leavesByUser[uid] || []).find((l) => dateStr >= l.startDate && dateStr <= l.endDate)?.leaveType || null;
+  // A half-day leave only ever covers a single date and counts as 0.5 unit.
+  const leaveOn = (uid, dateStr) =>
+    (leavesByUser[uid] || []).find((l) => dateStr >= l.startDate && dateStr <= l.endDate) || null;
 
   const byUserId = {};
   for (const u of users) {
@@ -85,10 +86,11 @@ const computeMonthPayroll = async (users) => {
       else if (status === "half-day") halfDays++;
       else if (status === "absent") absentDays++;
       else {
-        const leaveType = leaveTypeOn(uid, dateStr);
-        if (leaveType === "PWL") unpaidLeaveDays++;
-        else if (leaveType) paidLeaveDays++;
-        else absentDays++;
+        const leave = leaveOn(uid, dateStr);
+        if (!leave) { absentDays++; continue; }
+        const unit = leave.isHalfDay ? 0.5 : 1;
+        if (leave.leaveType === "PWL") unpaidLeaveDays += unit;
+        else paidLeaveDays += unit;
       }
     }
 

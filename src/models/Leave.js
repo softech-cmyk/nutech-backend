@@ -23,6 +23,12 @@ const leaveSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  // Only valid for a single-day leave (startDate === endDate) — counts as
+  // 0.5 day against quota/payroll instead of a full day.
+  isHalfDay: {
+    type: Boolean,
+    default: false,
+  },
   status: {
     type: String,
     enum: ["pending", "approved", "rejected"],
