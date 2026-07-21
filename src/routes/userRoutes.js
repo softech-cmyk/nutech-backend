@@ -8,6 +8,7 @@ import {
   assignManager,
   resetPassword,
   updateSalary,
+  updatePhone,
   updateSalaryAdjustments,
   getBankAccount,
   updateBankAccount,
@@ -25,6 +26,7 @@ router.patch("/:id/promote", protect, promoteToManager);       // promote to man
 router.patch("/:id/assign-manager", protect, assignManager);   // assign employee to manager
 router.patch("/:id/reset-password", protect, resetPassword);   // manager only
 router.patch("/:id/salary", protect, updateSalary);             // manager only
+router.patch("/:id/phone", protect, updatePhone);                // manager only
 router.patch("/:id/salary-adjustments", protect, updateSalaryAdjustments); // manager only
 router.get("/:id/bank-account", protect, getBankAccount);       // manager only, masked
 router.patch("/:id/bank-account", protect, updateBankAccount);  // manager only

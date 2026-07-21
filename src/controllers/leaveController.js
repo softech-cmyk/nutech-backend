@@ -4,15 +4,21 @@ import { sendPushToUser } from "../utils/webPush.js";
 const CL_ANNUAL_QUOTA = 12;
 
 const daysInRange = (start, end) => Math.round((new Date(end) - new Date(start)) / 86400000) + 1;
+const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/; // "HH:mm", 24-hour
 
 // A half-day leave always covers a single day (0.5 units); anything else is
 // counted in full days across its date range.
 const leaveUnits = (l) => (l.isHalfDay ? 0.5 : daysInRange(l.startDate, l.endDate));
 
+const halfDayLabel = (leave) => {
+  const session = leave.halfDaySession === "first-half" ? "first half" : "second half";
+  return leave.halfDayTime ? `${session}, ${leave.halfDayTime}` : session;
+};
+
 // POST /api/leaves/apply
 export const applyLeave = async (req, res) => {
   try {
-    const { leaveType, reason, startDate, endDate, isHalfDay } = req.body;
+    const { leaveType, reason, startDate, endDate, isHalfDay, halfDaySession, halfDayTime } = req.body;
     if (!leaveType || !reason || !startDate || !endDate) {
       return res.status(400).json({ message: "All fields are required." });
     }
@@ -21,6 +27,12 @@ export const applyLeave = async (req, res) => {
     }
     if (isHalfDay && startDate !== endDate) {
       return res.status(400).json({ message: "A half-day leave must be for a single date." });
+    }
+    if (isHalfDay && !["first-half", "second-half"].includes(halfDaySession)) {
+      return res.status(400).json({ message: "Select whether it's the first half or second half of the day." });
+    }
+    if (isHalfDay && halfDayTime && !TIME_RE.test(halfDayTime)) {
+      return res.status(400).json({ message: "Enter a valid time (HH:mm)." });
     }
     const year = startDate.slice(0, 4);
     if (endDate.slice(0, 4) !== year) {
@@ -51,6 +63,8 @@ export const applyLeave = async (req, res) => {
       startDate,
       endDate,
       isHalfDay: !!isHalfDay,
+      halfDaySession: isHalfDay ? halfDaySession : null,
+      halfDayTime: isHalfDay && halfDayTime ? halfDayTime : null,
     });
     return res.status(201).json({ message: "Leave applied successfully.", leave });
   } catch (err) {
@@ -102,7 +116,7 @@ export const approveLeave = async (req, res) => {
     if (!leave) return res.status(404).json({ message: "Leave not found." });
 
     const when = leave.isHalfDay
-      ? `(half day) on ${leave.startDate}`
+      ? `(half day, ${halfDayLabel(leave)}) on ${leave.startDate}`
       : leave.startDate === leave.endDate
         ? `on ${leave.startDate}`
         : `from ${leave.startDate} to ${leave.endDate}`;
@@ -133,7 +147,7 @@ export const rejectLeave = async (req, res) => {
     if (!leave) return res.status(404).json({ message: "Leave not found." });
 
     const when = leave.isHalfDay
-      ? `(half day) on ${leave.startDate}`
+      ? `(half day, ${halfDayLabel(leave)}) on ${leave.startDate}`
       : leave.startDate === leave.endDate
         ? `on ${leave.startDate}`
         : `from ${leave.startDate} to ${leave.endDate}`;

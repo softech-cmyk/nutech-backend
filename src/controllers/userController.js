@@ -140,6 +140,37 @@ export const updateSalary = async (req, res) => {
   }
 };
 
+// PATCH /api/users/:id/phone — manager-only. Updates an employee's phone number.
+export const updatePhone = async (req, res) => {
+  try {
+    if (req.user.role !== "manager") {
+      return res.status(403).json({ message: "Access denied. Managers only." });
+    }
+
+    const phone = req.body.phone?.trim();
+    const countryCode = req.body.countryCode?.trim() || "+91";
+    if (!phone || !/^[0-9]{10}$/.test(phone)) {
+      return res.status(400).json({ message: "Enter a valid 10-digit phone number." });
+    }
+
+    const clash = await User.findOne({ phone, _id: { $ne: req.params.id } });
+    if (clash) {
+      return res.status(409).json({ message: "Another account already uses this phone number." });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      { phone, countryCode },
+      { new: true }
+    ).select("-password -bankAccount.accountNumber");
+    if (!user) return res.status(404).json({ message: "User not found." });
+
+    return res.json({ message: "Phone number updated.", user });
+  } catch (err) {
+    return res.status(500).json({ message: "Could not update phone number.", error: err.message });
+  }
+};
+
 // PATCH /api/users/:id/salary-adjustments — manager-only. Optional further
 // deductions (ESI, PF, bonus, gratuity) applied on top of the attendance-based
 // net salary. None are required — any field left out is cleared to null.

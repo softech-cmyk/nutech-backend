@@ -29,6 +29,18 @@ const leaveSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  // Which half the employee is away for, and the specific clock time that
+  // marks the boundary — e.g. "first-half" + "13:00" means they'll be in
+  // from 1pm; "second-half" + "13:00" means they're leaving at 1pm.
+  halfDaySession: {
+    type: String,
+    enum: ["first-half", "second-half", null],
+    default: null,
+  },
+  halfDayTime: {
+    type: String, // "HH:mm", 24-hour
+    default: null,
+  },
   status: {
     type: String,
     enum: ["pending", "approved", "rejected"],
