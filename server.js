@@ -43,7 +43,7 @@ app.use(
             if (
                 !origin ||
                 allowedOrigins.includes(origin) ||
-                /^https:\/\/attendance-system-frontend[a-z0-9-]*\.vercel\.app$/.test(origin)
+                /^https:\/\/nutech-frontend[a-z0-9-]*\.vercel\.app$/.test(origin)
             ) {
                 callback(null, true);
             } else {
