@@ -20,6 +20,7 @@ import holidayRoutes from "./src/routes/holidayRoutes.js";
 import notificationRoutes from "./src/routes/notificationRoutes.js";
 import payrollRoutes from "./src/routes/payrollRoutes.js";
 import { initSocket } from "./src/socket/index.js";
+import { startAutoAbsentJob } from "./src/jobs/autoAbsentJob.js";
 
 
 // Load environment variables
@@ -110,6 +111,7 @@ const connectDB = async () => {
 // Start server only after DB connects
 const startServer = async () => {
     await connectDB();
+    startAutoAbsentJob();
     const PORT = process.env.PORT || 5000;
     httpServer.listen(PORT, () => {
         console.log(`🚀 Server running on port ${PORT}`);

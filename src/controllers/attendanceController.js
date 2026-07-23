@@ -9,6 +9,7 @@ import {
   isLateArrival,
   computePunchOutStatus,
 } from "../utils/attendanceTime.js";
+import { runAutoAbsentCheck } from "../services/autoAbsent.js";
 
 const MONTHLY_LATE_REBATES = 3;
 
@@ -287,6 +288,21 @@ export const markAttendance = async (req, res) => {
   } catch (err) {
     console.error("markAttendance error:", err.message);
     return res.status(500).json({ message: "Could not mark attendance.", error: err.message });
+  }
+};
+
+// POST /api/attendance/run-auto-absent-check  (manager-only, on-demand)
+// The same 12:30-cutoff absent check that runs on a schedule, triggerable
+// manually — useful for testing, and as a fallback since the scheduled job
+// only fires if the server happens to be awake at 12:30 (e.g. on Render's
+// free tier, which sleeps after inactivity).
+export const runAutoAbsentNow = async (req, res) => {
+  try {
+    const result = await runAutoAbsentCheck();
+    return res.json({ message: "Auto-absent check complete.", ...result });
+  } catch (err) {
+    console.error("runAutoAbsentNow error:", err.message);
+    return res.status(500).json({ message: "Could not run auto-absent check.", error: err.message });
   }
 };
 

@@ -10,6 +10,7 @@ import {
   getSundayStatus,
   regularizeAttendance,
   markAttendance,
+  runAutoAbsentNow,
   clearTodayAttendance,
   clearAllAttendance,
   geocodeLocation,
@@ -27,6 +28,7 @@ router.get("/team",              protect, getTeamAttendance);
 router.get("/all",               protect, requireManager, getAllAttendance);
 router.get("/sunday-status",     protect, requireManager, getSundayStatus);
 router.post("/mark",             protect, requireManager, markAttendance);
+router.post("/run-auto-absent-check", protect, requireManager, runAutoAbsentNow);
 router.patch("/:id/regularize",  protect, requireManager, regularizeAttendance);
 router.post("/:id/view-location", protect, requireManager, logLocationView);
 router.get("/geocode",           protect, geocodeLocation);
