@@ -250,7 +250,7 @@ export const regularizeAttendance = async (req, res) => {
 // instead — this only creates new records, it never overwrites one.
 export const markAttendance = async (req, res) => {
   try {
-    const { userId, status, note, date } = req.body;
+    const { userId, status, note, date, punchInTime } = req.body;
     if (!userId || !status) {
       return res.status(400).json({ message: "userId and status are required." });
     }
@@ -259,6 +259,9 @@ export const markAttendance = async (req, res) => {
     }
     if (!note?.trim()) {
       return res.status(400).json({ message: "A reason is required to mark attendance." });
+    }
+    if (punchInTime && !/^\d{2}:\d{2}$/.test(punchInTime)) {
+      return res.status(400).json({ message: "punchInTime must be in HH:mm format." });
     }
 
     const user = await User.findById(userId).select("company shiftStart shiftEnd");
@@ -270,13 +273,22 @@ export const markAttendance = async (req, res) => {
       return res.status(409).json({ message: "This employee already has an attendance record for this date — use regularize instead." });
     }
 
+    // A punch-in time only makes sense if the employee actually showed up —
+    // ignored for "absent" even if one was somehow submitted.
+    const punchIn = status !== "absent" && punchInTime
+      ? new Date(`${targetDate}T${punchInTime}:00+05:30`)
+      : null;
+
     const record = await Attendance.create({
       userId,
       company: user.company || "Nutech International",
       date: targetDate,
       status,
+      punchIn,
+      sessions: punchIn ? [{ punchIn }] : [],
       shiftStart: user.shiftStart || "10:00",
       shiftEnd: user.shiftEnd || "18:30",
+      lateArrival: punchIn ? isLateArrival(punchIn, user.shiftStart) : false,
       regularized: true,
       regularizedBy: req.user.id,
       regularizedAt: new Date(),
