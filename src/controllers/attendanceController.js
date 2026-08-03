@@ -1,7 +1,7 @@
 import Attendance from "../models/Attendance.js";
 import User from "../models/User.js";
 import axios from "axios";
-import { getLiveLocations } from "../socket/index.js";
+import { getLiveLocations, recordLocationUpdate } from "../socket/index.js";
 import {
   todayStr,
   parseTimeToMinutes,
@@ -359,6 +359,24 @@ export const geocodeLocation = async (req, res) => {
 // GET /api/attendance/live-locations  (manager-only — initial snapshot before socket events arrive)
 export const getLiveLocationsSnapshot = (req, res) => {
   return res.json({ locations: getLiveLocations() });
+};
+
+// POST /api/attendance/location — HTTP fallback for the background geolocation
+// watcher, used when the app's socket is disconnected/reconnecting (e.g. right
+// after Android wakes a backgrounded app to deliver a location fix).
+export const postLocationUpdate = async (req, res) => {
+  if (req.user.role !== "employee") {
+    return res.status(403).json({ message: "Only employees report location." });
+  }
+
+  const { lat, lng } = req.body;
+  if (typeof lat !== "number" || typeof lng !== "number") {
+    return res.status(400).json({ message: "lat and lng must be numbers." });
+  }
+
+  const user = await User.findById(req.user.id).select("name");
+  recordLocationUpdate({ userId: req.user.id, name: user?.name || "Employee", lat, lng });
+  return res.status(204).end();
 };
 
 // DELETE /api/attendance/clear-all

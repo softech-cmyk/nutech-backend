@@ -7,6 +7,20 @@ const liveLocations = new Map();
 
 export const getLiveLocations = () => Array.from(liveLocations.values());
 
+// Set once initSocket runs, so recordLocationUpdate can broadcast to
+// managers regardless of whether the update arrived over the socket
+// itself or the HTTP fallback endpoint (used when a backgrounded app's
+// socket is disconnected/reconnecting).
+let ioInstance = null;
+
+export const recordLocationUpdate = ({ userId, name, lat, lng }) => {
+  if (typeof lat !== "number" || typeof lng !== "number") return;
+
+  const entry = { userId, name, lat, lng, updatedAt: new Date().toISOString() };
+  liveLocations.set(userId, entry);
+  ioInstance?.to("managers").emit("location:update", entry);
+};
+
 export const initSocket = (httpServer, allowedOrigins) => {
   const io = new Server(httpServer, {
     cors: {
@@ -39,6 +53,8 @@ export const initSocket = (httpServer, allowedOrigins) => {
     }
   });
 
+  ioInstance = io;
+
   io.on("connection", (socket) => {
     const { id: userId, role, name } = socket.user;
 
@@ -51,11 +67,7 @@ export const initSocket = (httpServer, allowedOrigins) => {
 
     socket.on("location:update", ({ lat, lng }) => {
       if (role !== "employee") return;
-      if (typeof lat !== "number" || typeof lng !== "number") return;
-
-      const entry = { userId, name, lat, lng, updatedAt: new Date().toISOString() };
-      liveLocations.set(userId, entry);
-      io.to("managers").emit("location:update", entry);
+      recordLocationUpdate({ userId, name, lat, lng });
     });
 
     socket.on("location:stop", () => {
