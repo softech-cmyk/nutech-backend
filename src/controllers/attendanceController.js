@@ -201,7 +201,7 @@ export const clearTodayAttendance = async (req, res) => {
 // PATCH /api/attendance/:id/regularize  (manager-only override)
 export const regularizeAttendance = async (req, res) => {
   try {
-    const { action, note } = req.body;
+    const { action, note, punchInTime, punchOutTime } = req.body;
     if (!["full-day", "half-day", "reset"].includes(action)) {
       return res.status(400).json({ message: "action must be 'full-day', 'half-day', or 'reset'." });
     }
@@ -211,9 +211,45 @@ export const regularizeAttendance = async (req, res) => {
     if (action !== "reset" && !note?.trim()) {
       return res.status(400).json({ message: "A reason is required to regularize attendance." });
     }
+    if (punchInTime && !/^\d{2}:\d{2}$/.test(punchInTime)) {
+      return res.status(400).json({ message: "punchInTime must be in HH:mm format." });
+    }
+    if (punchOutTime && !/^\d{2}:\d{2}$/.test(punchOutTime)) {
+      return res.status(400).json({ message: "punchOutTime must be in HH:mm format." });
+    }
 
     const record = await Attendance.findById(req.params.id);
     if (!record) return res.status(404).json({ message: "Attendance record not found." });
+
+    // Time overrides only make sense alongside a full/half-day override —
+    // "reset" reverts to the system's own computed record, so editing the
+    // punch times right before reverting would just be discarded.
+    if (action !== "reset" && (punchInTime || punchOutTime)) {
+      const toDate = (hhmm) => new Date(`${record.date}T${hhmm}:00+05:30`);
+      const last = record.sessions[record.sessions.length - 1];
+
+      if (!last) {
+        // No session exists yet — a punch-out needs a punch-in to pair with.
+        if (punchOutTime && !punchInTime) {
+          return res.status(400).json({ message: "punchInTime is required to set a punch-out time when no session exists yet." });
+        }
+        record.sessions.push({
+          punchIn: toDate(punchInTime),
+          punchOut: punchOutTime ? toDate(punchOutTime) : null,
+        });
+      } else {
+        if (punchInTime)  last.punchIn  = toDate(punchInTime);
+        if (punchOutTime) last.punchOut = toDate(punchOutTime);
+        record.markModified("sessions");
+      }
+
+      record.punchIn  = record.sessions[0].punchIn;
+      record.punchOut = record.sessions[record.sessions.length - 1].punchOut;
+      record.totalMinutes = record.sessions.reduce(
+        (sum, s) => (s.punchOut ? sum + Math.floor((s.punchOut - s.punchIn) / 60000) : sum),
+        0
+      );
+    }
 
     if (action === "reset") {
       // Recompute what the system would have decided on its own, from the
@@ -250,7 +286,7 @@ export const regularizeAttendance = async (req, res) => {
 // instead — this only creates new records, it never overwrites one.
 export const markAttendance = async (req, res) => {
   try {
-    const { userId, status, note, date, punchInTime } = req.body;
+    const { userId, status, note, date, punchInTime, punchOutTime } = req.body;
     if (!userId || !status) {
       return res.status(400).json({ message: "userId and status are required." });
     }
@@ -263,6 +299,13 @@ export const markAttendance = async (req, res) => {
     if (punchInTime && !/^\d{2}:\d{2}$/.test(punchInTime)) {
       return res.status(400).json({ message: "punchInTime must be in HH:mm format." });
     }
+    if (punchOutTime && !/^\d{2}:\d{2}$/.test(punchOutTime)) {
+      return res.status(400).json({ message: "punchOutTime must be in HH:mm format." });
+    }
+    // A punch-out needs a punch-in on the books to pair with.
+    if (punchOutTime && !punchInTime) {
+      return res.status(400).json({ message: "punchInTime is required to set a punch-out time." });
+    }
 
     const user = await User.findById(userId).select("company shiftStart shiftEnd");
     if (!user) return res.status(404).json({ message: "Employee not found." });
@@ -273,11 +316,15 @@ export const markAttendance = async (req, res) => {
       return res.status(409).json({ message: "This employee already has an attendance record for this date — use regularize instead." });
     }
 
-    // A punch-in time only makes sense if the employee actually showed up —
+    // A punch-in/out time only makes sense if the employee actually showed up —
     // ignored for "absent" even if one was somehow submitted.
     const punchIn = status !== "absent" && punchInTime
       ? new Date(`${targetDate}T${punchInTime}:00+05:30`)
       : null;
+    const punchOut = status !== "absent" && punchIn && punchOutTime
+      ? new Date(`${targetDate}T${punchOutTime}:00+05:30`)
+      : null;
+    const totalMinutes = punchOut ? Math.floor((punchOut - punchIn) / 60000) : null;
 
     const record = await Attendance.create({
       userId,
@@ -285,7 +332,9 @@ export const markAttendance = async (req, res) => {
       date: targetDate,
       status,
       punchIn,
-      sessions: punchIn ? [{ punchIn }] : [],
+      punchOut,
+      totalMinutes,
+      sessions: punchIn ? [{ punchIn, punchOut }] : [],
       shiftStart: user.shiftStart || "10:00",
       shiftEnd: user.shiftEnd || "18:30",
       lateArrival: punchIn ? isLateArrival(punchIn, user.shiftStart) : false,
