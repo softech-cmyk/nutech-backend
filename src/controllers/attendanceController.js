@@ -201,13 +201,18 @@ export const clearTodayAttendance = async (req, res) => {
 // PATCH /api/attendance/:id/regularize  (manager-only override)
 export const regularizeAttendance = async (req, res) => {
   try {
-    const { action, note, punchInTime, punchOutTime } = req.body;
+    const {
+      action, note, punchInTime, punchOutTime,
+      punchInLat, punchInLng, punchInAddress,
+      punchOutLat, punchOutLng, punchOutAddress,
+    } = req.body;
     if (!["full-day", "half-day", "reset"].includes(action)) {
       return res.status(400).json({ message: "action must be 'full-day', 'half-day', or 'reset'." });
     }
     // Resetting just reverts to the system's own computed status — nothing to
     // justify. Overriding it to full/half day is a manual judgment call, so
-    // a reason is required for accountability.
+    // a reason is required for accountability. The same note also covers any
+    // location correction made alongside it.
     if (action !== "reset" && !note?.trim()) {
       return res.status(400).json({ message: "A reason is required to regularize attendance." });
     }
@@ -217,29 +222,53 @@ export const regularizeAttendance = async (req, res) => {
     if (punchOutTime && !/^\d{2}:\d{2}$/.test(punchOutTime)) {
       return res.status(400).json({ message: "punchOutTime must be in HH:mm format." });
     }
+    if ((punchInLat != null) !== (punchInLng != null)) {
+      return res.status(400).json({ message: "punchInLat and punchInLng must be provided together." });
+    }
+    if ((punchOutLat != null) !== (punchOutLng != null)) {
+      return res.status(400).json({ message: "punchOutLat and punchOutLng must be provided together." });
+    }
+    if ([punchInLat, punchInLng, punchOutLat, punchOutLng].some((v) => v != null && typeof v !== "number")) {
+      return res.status(400).json({ message: "Location coordinates must be numbers." });
+    }
 
     const record = await Attendance.findById(req.params.id);
     if (!record) return res.status(404).json({ message: "Attendance record not found." });
 
-    // Time overrides only make sense alongside a full/half-day override —
-    // "reset" reverts to the system's own computed record, so editing the
-    // punch times right before reverting would just be discarded.
-    if (action !== "reset" && (punchInTime || punchOutTime)) {
+    const hasPunchInLoc  = punchInLat  != null && punchInLng  != null;
+    const hasPunchOutLoc = punchOutLat != null && punchOutLng != null;
+    const hasLocationOverride = hasPunchInLoc || hasPunchOutLoc || punchInAddress || punchOutAddress;
+
+    // Time/location overrides only make sense alongside a full/half-day
+    // override — "reset" reverts to the system's own computed record, so
+    // editing them right before reverting would just be discarded.
+    if (action !== "reset" && (punchInTime || punchOutTime || hasLocationOverride)) {
       const toDate = (hhmm) => new Date(`${record.date}T${hhmm}:00+05:30`);
       const last = record.sessions[record.sessions.length - 1];
 
       if (!last) {
-        // No session exists yet — a punch-out needs a punch-in to pair with.
+        // No session exists yet — a punch-out (or a location) needs a punch-in to pair with.
         if (punchOutTime && !punchInTime) {
           return res.status(400).json({ message: "punchInTime is required to set a punch-out time when no session exists yet." });
+        }
+        if (hasLocationOverride && !punchInTime) {
+          return res.status(400).json({ message: "punchInTime is required to set a location when no session exists yet." });
         }
         record.sessions.push({
           punchIn: toDate(punchInTime),
           punchOut: punchOutTime ? toDate(punchOutTime) : null,
+          ...(hasPunchInLoc    ? { punchInLocation:  { lat: punchInLat,  lng: punchInLng  } } : {}),
+          ...(punchInAddress   ? { punchInAddress }                                          : {}),
+          ...(hasPunchOutLoc   ? { punchOutLocation: { lat: punchOutLat, lng: punchOutLng } } : {}),
+          ...(punchOutAddress  ? { punchOutAddress }                                         : {}),
         });
       } else {
-        if (punchInTime)  last.punchIn  = toDate(punchInTime);
-        if (punchOutTime) last.punchOut = toDate(punchOutTime);
+        if (punchInTime)     last.punchIn          = toDate(punchInTime);
+        if (punchOutTime)    last.punchOut          = toDate(punchOutTime);
+        if (hasPunchInLoc)   last.punchInLocation   = { lat: punchInLat, lng: punchInLng };
+        if (punchInAddress)  last.punchInAddress    = punchInAddress;
+        if (hasPunchOutLoc)  last.punchOutLocation  = { lat: punchOutLat, lng: punchOutLng };
+        if (punchOutAddress) last.punchOutAddress   = punchOutAddress;
         record.markModified("sessions");
       }
 
@@ -249,6 +278,12 @@ export const regularizeAttendance = async (req, res) => {
         (sum, s) => (s.punchOut ? sum + Math.floor((s.punchOut - s.punchIn) / 60000) : sum),
         0
       );
+      // Top-level location aggregates mirror the first session's punch-in and
+      // the latest session's punch-out, same as the punchIn/punchOut sync above.
+      record.punchInLocation  = record.sessions[0].punchInLocation;
+      record.punchInAddress   = record.sessions[0].punchInAddress;
+      record.punchOutLocation = record.sessions[record.sessions.length - 1].punchOutLocation;
+      record.punchOutAddress  = record.sessions[record.sessions.length - 1].punchOutAddress;
     }
 
     if (action === "reset") {
