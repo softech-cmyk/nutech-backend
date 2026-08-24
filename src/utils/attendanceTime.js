@@ -33,9 +33,10 @@ export const isLateArrival = (punchInTime, shiftStart = "10:00") => {
   return minutesOfDay > graceDeadline || minutesOfDay > parseTimeToMinutes(HALF_DAY_CUTOFF);
 };
 
-// An unforgiven late arrival is already locked to half-day regardless of hours worked.
+// An unforgiven late arrival (monthly rebate quota already used up) is already
+// locked to absent regardless of hours worked.
 export const computePunchOutStatus = (record, totalMinutes) => {
   const halfDayMinutes = shiftDurationMinutes(record.shiftStart, record.shiftEnd) / 2;
-  const lockedHalfDay = record.lateArrival && !record.lateRebateApplied;
-  return lockedHalfDay ? "half-day" : (totalMinutes >= halfDayMinutes ? "present" : "half-day");
+  const lockedAbsent = record.lateArrival && !record.lateRebateApplied;
+  return lockedAbsent ? "absent" : (totalMinutes >= halfDayMinutes ? "present" : "half-day");
 };

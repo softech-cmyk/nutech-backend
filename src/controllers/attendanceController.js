@@ -73,9 +73,10 @@ export const punchIn = async (req, res) => {
     if (isFirstPunch) {
       // A forgiven late arrival is still tentatively "present" — punch-out's
       // hours-worked check can still knock it down to half-day. An unforgiven
-      // late arrival is locked to half-day regardless of hours worked.
+      // late arrival (monthly rebate quota already used up) is locked to
+      // absent regardless of hours worked.
       setFields.punchIn          = punchInTime;
-      setFields.status           = late && !rebateApplied ? "half-day" : "present";
+      setFields.status           = late && !rebateApplied ? "absent" : "present";
       setFields.lateArrival      = late;
       setFields.lateRebateApplied = late && rebateApplied;
       if (lat && lng) setFields.punchInLocation = { lat, lng };
@@ -292,7 +293,7 @@ export const regularizeAttendance = async (req, res) => {
       const lockedByLateness = record.lateArrival && !record.lateRebateApplied;
       const halfDayMinutes = shiftDurationMinutes(record.shiftStart, record.shiftEnd) / 2;
       record.status = lockedByLateness
-        ? "half-day"
+        ? "absent"
         : (record.totalMinutes != null ? (record.totalMinutes >= halfDayMinutes ? "present" : "half-day") : "present");
       record.regularized         = false;
       record.regularizedBy       = null;
