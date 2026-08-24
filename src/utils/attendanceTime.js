@@ -2,7 +2,8 @@
 export const todayStr = () => new Date().toISOString().slice(0, 10);
 
 export const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-const LATE_GRACE_MINUTES = 15;
+// No grace window — anything after the shift's own start time counts as late.
+const LATE_GRACE_MINUTES = 0;
 
 // Absolute half-day cutoff, regardless of an employee's own shift start —
 // matches the auto-absent job's cutoff for punching in at all.
