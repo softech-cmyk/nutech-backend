@@ -207,8 +207,8 @@ export const regularizeAttendance = async (req, res) => {
       punchInLat, punchInLng, punchInAddress,
       punchOutLat, punchOutLng, punchOutAddress,
     } = req.body;
-    if (!["full-day", "half-day", "reset"].includes(action)) {
-      return res.status(400).json({ message: "action must be 'full-day', 'half-day', or 'reset'." });
+    if (!["full-day", "half-day", "absent", "reset"].includes(action)) {
+      return res.status(400).json({ message: "action must be 'full-day', 'half-day', 'absent', or 'reset'." });
     }
     // Resetting just reverts to the system's own computed status — nothing to
     // justify. Overriding it to full/half day is a manual judgment call, so
@@ -300,7 +300,7 @@ export const regularizeAttendance = async (req, res) => {
       record.regularizedAt       = null;
       record.regularizationNote  = null;
     } else {
-      record.status              = action === "full-day" ? "present" : "half-day";
+      record.status              = action === "full-day" ? "present" : action === "absent" ? "absent" : "half-day";
       record.regularized         = true;
       record.regularizedBy       = req.user.id;
       record.regularizedAt       = new Date();
