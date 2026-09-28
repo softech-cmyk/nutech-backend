@@ -40,7 +40,7 @@ const userSchema = new mongoose.Schema({
   },
   company: {
     type: String,
-    enum: ["Nutech International", "SPL Technologies"],
+    enum: ["Nutech International", "SPL Technologies", "Phenotec Innovations"],
     default: "Nutech International",
   },
   mustChangePassword: {
