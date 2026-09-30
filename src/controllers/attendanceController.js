@@ -6,12 +6,9 @@ import {
   todayStr,
   parseTimeToMinutes,
   shiftDurationMinutes,
-  isLateArrival,
   computePunchOutStatus,
 } from "../utils/attendanceTime.js";
 import { runAutoAbsentCheck } from "../services/autoAbsent.js";
-
-const MONTHLY_LATE_REBATES = 3;
 
 // Sunday is only a paid holiday if the employee worked at least 4.5 of their
 // own standard shift-days (Mon–Sat) that week.
@@ -38,26 +35,7 @@ export const punchIn = async (req, res) => {
     const shiftStart = user.shiftStart || "10:00";
     const shiftEnd   = user.shiftEnd   || "18:30";
 
-    // Late-arrival / rebate status is decided once, off the day's very first
-    // punch-in — stepping out and back later doesn't re-trigger it.
     const isFirstPunch = !existing || !existing.sessions?.length;
-    let late = existing?.lateArrival || false;
-    let rebateApplied = existing?.lateRebateApplied || false;
-    let lateRebatesUsed = 0;
-
-    if (isFirstPunch) {
-      late = isLateArrival(punchInTime, shiftStart);
-      if (late) {
-        const firstOfMonth = `${date.slice(0, 7)}-01`;
-        const priorLateCount = await Attendance.countDocuments({
-          userId: user._id,
-          lateArrival: true,
-          date: { $gte: firstOfMonth, $lt: date },
-        });
-        rebateApplied = priorLateCount < MONTHLY_LATE_REBATES;
-        lateRebatesUsed = rebateApplied ? priorLateCount + 1 : MONTHLY_LATE_REBATES;
-      }
-    }
 
     const newSession = {
       punchIn: punchInTime,
@@ -71,14 +49,8 @@ export const punchIn = async (req, res) => {
       shiftEnd,
     };
     if (isFirstPunch) {
-      // A forgiven late arrival is still tentatively "present" — punch-out's
-      // hours-worked check can still knock it down to half-day. An unforgiven
-      // late arrival (monthly rebate quota already used up) is locked to
-      // absent regardless of hours worked.
-      setFields.punchIn          = punchInTime;
-      setFields.status           = late && !rebateApplied ? "absent" : "present";
-      setFields.lateArrival      = late;
-      setFields.lateRebateApplied = late && rebateApplied;
+      setFields.punchIn = punchInTime;
+      setFields.status  = "present";
       if (lat && lng) setFields.punchInLocation = { lat, lng };
       if (address)    setFields.punchInAddress  = address;
     }
@@ -92,8 +64,6 @@ export const punchIn = async (req, res) => {
     return res.json({
       message: "Punched in successfully.",
       attendance: record,
-      lateRebatesUsed,
-      lateRebatesRemaining: late ? Math.max(0, MONTHLY_LATE_REBATES - lateRebatesUsed) : null,
     });
   } catch (err) {
     console.error("punchIn error:", err.message);
@@ -290,11 +260,10 @@ export const regularizeAttendance = async (req, res) => {
     if (action === "reset") {
       // Recompute what the system would have decided on its own, from the
       // facts already on the record — no separate "original status" needed.
-      const lockedByLateness = record.lateArrival && !record.lateRebateApplied;
       const halfDayMinutes = shiftDurationMinutes(record.shiftStart, record.shiftEnd) / 2;
-      record.status = lockedByLateness
-        ? "absent"
-        : (record.totalMinutes != null ? (record.totalMinutes >= halfDayMinutes ? "present" : "half-day") : "present");
+      record.status = record.totalMinutes != null
+        ? (record.totalMinutes >= halfDayMinutes ? "present" : "half-day")
+        : "present";
       record.regularized         = false;
       record.regularizedBy       = null;
       record.regularizedAt       = null;
@@ -373,7 +342,6 @@ export const markAttendance = async (req, res) => {
       sessions: punchIn ? [{ punchIn, punchOut }] : [],
       shiftStart: user.shiftStart || "10:00",
       shiftEnd: user.shiftEnd || "18:30",
-      lateArrival: punchIn ? isLateArrival(punchIn, user.shiftStart) : false,
       regularized: true,
       regularizedBy: req.user.id,
       regularizedAt: new Date(),

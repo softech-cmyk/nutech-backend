@@ -59,22 +59,14 @@ const attendanceSchema = new mongoose.Schema({
     }],
     default: [],
   },
-  // Snapshot of the employee's shift at punch-in time, so late-arrival/half-day
-  // rules stay consistent for this record even if their shift changes later.
+  // Snapshot of the employee's shift at punch-in time, so half-day rules stay
+  // consistent for this record even if their shift changes later.
   shiftStart: { type: String, default: "10:00" },
   shiftEnd:   { type: String, default: "18:30" },
   status: {
     type: String,
     enum: ["present", "half-day", "absent"],
     default: "present",
-  },
-  lateArrival: {
-    type: Boolean,
-    default: false,
-  },
-  lateRebateApplied: {
-    type: Boolean,
-    default: false,
   },
   regularized: {
     type: Boolean,
