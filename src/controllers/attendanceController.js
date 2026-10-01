@@ -6,9 +6,15 @@ import {
   todayStr,
   parseTimeToMinutes,
   shiftDurationMinutes,
+  isLateArrival,
   computePunchOutStatus,
 } from "../utils/attendanceTime.js";
 import { runAutoAbsentCheck } from "../services/autoAbsent.js";
+
+// Every 3rd late arrival in a calendar month (3rd, 6th, 9th...) locks that
+// day's status to absent, regardless of hours worked. The count resets right
+// after each trigger — the 4th and 5th late days go back to being tolerated.
+const LATE_CYCLE_LENGTH = 3;
 
 // Sunday is only a paid holiday if the employee worked at least 4.5 of their
 // own standard shift-days (Mon–Sat) that week.
@@ -35,7 +41,26 @@ export const punchIn = async (req, res) => {
     const shiftStart = user.shiftStart || "10:00";
     const shiftEnd   = user.shiftEnd   || "18:30";
 
+    // Late-arrival status is decided once, off the day's very first
+    // punch-in — stepping out and back later doesn't re-trigger it.
     const isFirstPunch = !existing || !existing.sessions?.length;
+    let late = existing?.lateArrival || false;
+    let lateCycleAbsent = existing?.lateCycleAbsent || false;
+    let lateCycleCount = 0;
+
+    if (isFirstPunch) {
+      late = isLateArrival(punchInTime, shiftStart);
+      if (late) {
+        const firstOfMonth = `${date.slice(0, 7)}-01`;
+        const priorLateCount = await Attendance.countDocuments({
+          userId: user._id,
+          lateArrival: true,
+          date: { $gte: firstOfMonth, $lt: date },
+        });
+        lateCycleCount = priorLateCount + 1;
+        lateCycleAbsent = lateCycleCount % LATE_CYCLE_LENGTH === 0;
+      }
+    }
 
     const newSession = {
       punchIn: punchInTime,
@@ -49,8 +74,14 @@ export const punchIn = async (req, res) => {
       shiftEnd,
     };
     if (isFirstPunch) {
-      setFields.punchIn = punchInTime;
-      setFields.status  = "present";
+      // A tolerated late arrival is still tentatively "present" — punch-out's
+      // hours-worked check can still knock it down to half-day. A late
+      // arrival that's the 3rd/6th/9th... this month is locked to absent
+      // regardless of hours worked.
+      setFields.punchIn         = punchInTime;
+      setFields.status          = lateCycleAbsent ? "absent" : "present";
+      setFields.lateArrival     = late;
+      setFields.lateCycleAbsent = lateCycleAbsent;
       if (lat && lng) setFields.punchInLocation = { lat, lng };
       if (address)    setFields.punchInAddress  = address;
     }
@@ -64,6 +95,7 @@ export const punchIn = async (req, res) => {
     return res.json({
       message: "Punched in successfully.",
       attendance: record,
+      lateCycleCount: late ? lateCycleCount : null,
     });
   } catch (err) {
     console.error("punchIn error:", err.message);
@@ -261,9 +293,9 @@ export const regularizeAttendance = async (req, res) => {
       // Recompute what the system would have decided on its own, from the
       // facts already on the record — no separate "original status" needed.
       const halfDayMinutes = shiftDurationMinutes(record.shiftStart, record.shiftEnd) / 2;
-      record.status = record.totalMinutes != null
-        ? (record.totalMinutes >= halfDayMinutes ? "present" : "half-day")
-        : "present";
+      record.status = record.lateCycleAbsent
+        ? "absent"
+        : (record.totalMinutes != null ? (record.totalMinutes >= halfDayMinutes ? "present" : "half-day") : "present");
       record.regularized         = false;
       record.regularizedBy       = null;
       record.regularizedAt       = null;
@@ -342,6 +374,7 @@ export const markAttendance = async (req, res) => {
       sessions: punchIn ? [{ punchIn, punchOut }] : [],
       shiftStart: user.shiftStart || "10:00",
       shiftEnd: user.shiftEnd || "18:30",
+      lateArrival: punchIn ? isLateArrival(punchIn, user.shiftStart) : false,
       regularized: true,
       regularizedBy: req.user.id,
       regularizedAt: new Date(),
